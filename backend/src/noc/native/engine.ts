@@ -27,7 +27,12 @@ import { horaLocal } from '../http.js';
 import { dur } from './analysis.js';
 import { parse, norm, type Intent, type Parsed, type Periodo } from './nlu.js';
 import * as nia from './persona.js';
-import { calcular, dataHora, llmGeral, resetGeral, responderGeral } from './geral.js';
+import { dashboardDeAlarmes } from '../dashboard.js';
+import { calcular, dataHora, llmGeral, resetGeral, responderGeral, responderTecnico } from './geral.js';
+import { dominioTecnico, pedidoDeCodigo, perguntaTecnica } from './especialidades.js';
+
+// Intenções que consultam os sistemas do NOC: pergunta de "como funciona" não as desvia.
+const CONSULTA_SISTEMAS = ['alarmes', 'eventos', 'relatorio', 'dashboard', 'opa_fila', 'opa_resumo', 'opa_protocolo', 'os_ixc', 'cliente', 'cadastrar', 'abrir', 'topologia', 'conectados', 'caminho', 'impacto', 'onus', 'ftth', 'base', 'equipamento'];
 
 type Emit = (e: AssistantEvent) => void;
 type Rec = Record<string, unknown>;
@@ -168,6 +173,8 @@ async function alarmes(t: Turn, q: Parsed): Promise<string> {
   ].join('');
 
   const crise = desastres.length > 0 || losRecentes >= 5;
+  // Painel visual dos mesmos alarmes (chat e NIA TV).
+  t.painel(dashboardDeAlarmes({ problems: probs, severidade: SEV_LABEL[sev] ?? String(sev), onde, causasClientes: causas, losRecentes }));
   const md = [nia.aberturaAlarmes(crise) + fala];
   if (infra.length) {
     md.push(`### Infraestrutura (${infra.length})`, table(['Severidade', 'Host', 'Problema', 'Desde', 'Reconhecido'],
@@ -754,6 +761,7 @@ const AJUDA = [
   '- **Relatórios e dashboards** — "relatório de hoje", "dashboard da semana", "painel de atendimentos de ontem" (painel visual com indicadores e gráficos, exportável em PDF)',
   '- **Topologia 3D** — "gere a topologia 3D da rede backbone", "mapa da rede"',
   '- **Perguntas gerais** — "quanto é 15% de 230?", "que horas são?", "quem inventou a fibra óptica?" (pesquiso na web e respondo)',
+  '- **Engenharia** — "crie um script Python que manda os alarmes de desastre no Telegram", "calcule o orçamento óptico de 15 km com splitter 1:8 e 1:16", "monte um sensor de temperatura para o POP com ESP32"',
   '- **Base de conhecimento** — "o que diz o manual sobre troca de ONU?", "procure nos documentos sobre VLAN" (envie PDFs em Base e identidade)',
   '- **Cadastros (com confirmação)** — "cadastre no zabbix o host X com IP 10.0.0.5 no grupo OLTs UpDown", cliente, POP, equipamento ou enlace no sistema NOC',
   '- **Manuais e pesquisa na web** — "gere um manual de como configurar a ONU HG8245H", "pesquise na web sobre GPON"',
@@ -813,6 +821,17 @@ export async function askNative(sessionId: string, message: string, onEvent: Emi
     && /^(quem (inventou|criou|descobriu|desenvolveu|foi|e|era)|quando (foi|surgiu|inventaram|criaram|comecou)|por ?que (a|o|as|os) |qual (e |foi )?a (historia|origem|diferenca)|historia d|origem d|diferenca entre)/.test(q.texto)) q.intent = 'geral';
   // Assunto claramente de fora ("o tempo em Santos", "cotação do dólar") vence o nome de um POP citado de passagem.
   if (['equipamento', 'conectados', 'alarmes'].includes(q.intent) && ASSUNTO_GERAL.test(q.texto) && !/\b(alarm|olt|onu|switch|roteador|porta|enlace|link)/.test(q.texto)) q.intent = 'geral';
+  // Engenharia (código, projeto de rede, hardware/Arduino): vai para o especialista. Pedido de
+  // código vence qualquer intenção ("crie um script que lista os alarmes" é programação);
+  // pergunta de projeto/entendimento só vence o que não for consulta aos sistemas.
+  const area = dominioTecnico(q.texto);
+  const codigo = pedidoDeCodigo(q.texto, q.original);
+  // Consulta de verdade: cita equipamento/caixa/cliente/protocolo conhecido ou pede alarme, relatório, fila…
+  // (um nome solto como "ESP32" não conta: vira host por ter número, mas não é equipamento da rede).
+  const consultaReal = q.equipamentos.length > 0 || Boolean(q.caixa || q.cliente || q.protocolo)
+    || /\b(alarm\w*|alertas?|relatorio|dashboard|painel|fila|atendiment\w*|o\.?s\b|ordens? de servico|clientes?|cadastr\w*|abr[aei]r?|abre|topologia|caminho|impacto|conectad\w*|ligad[oa]s? (no|na|ao)|zabbix|ixc|opa)\b/.test(q.texto);
+  if (area && (codigo || ['desconhecido', 'geral', 'pesquisa', 'tecnico'].includes(q.intent)
+    || (perguntaTecnica(q.texto) && (!CONSULTA_SISTEMAS.includes(q.intent) || !consultaReal)))) q.intent = 'tecnico';
 
   const t = new Turn(onEvent);
   t.conversa = sessionId;
@@ -823,7 +842,7 @@ export async function askNative(sessionId: string, message: string, onEvent: Emi
     text = nia.erro(e instanceof Error ? e.message : String(e));
   }
   if (!['saudacao', 'agradecimento', 'ajuda', 'desconhecido'].includes(q.intent)) { ctx.last = q; ctx.lastIntent = q.intent; }
-  return { text, model: t.modelo ? `NIA · ${t.modelo} (pergunta geral)` : NATIVE_LABEL, toolsUsed: t.toolsUsed, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+  return { text, model: t.modelo ? `NIA · ${t.modelo} (${q.intent === 'tecnico' ? 'especialista' : 'pergunta geral'})` : NATIVE_LABEL, toolsUsed: t.toolsUsed, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
 }
 
 async function responder(t: Turn, q: Parsed, k: Knowledge): Promise<string> {
@@ -855,6 +874,7 @@ async function responder(t: Turn, q: Parsed, k: Knowledge): Promise<string> {
     case 'cliente': return cliente(t, q);
     case 'ftth': return ftth(t, q);
     case 'geral': return geral(t, q);
+    case 'tecnico': return tecnico(t, q);
     default:
       return `${nia.naoEntendi(cut(q.original, 80))}\n\n${AJUDA.split('\n').slice(1).join('\n')}`;
   }
@@ -862,6 +882,14 @@ async function responder(t: Turn, q: Parsed, k: Knowledge): Promise<string> {
 
 const VOCAB_NOC = /\b(equipamento|porta|interface|olt|onu|ont|switch|roteador|host|enlace|link|modelo|fabricante|backbone|pop|servidor|concentrador|bras|bng|cto|ceo|alarme|sinal|rede|cliente)s?\b/;
 const ASSUNTO_GERAL = /\b(previsao do tempo|(como (esta|ta|vai (estar|ficar))|e) o tempo|clima|temperatura|vai chover|chuva|cotacao|dolar|euro|bitcoin|noticias?|placar|jogo d[oe]|horoscopo|receita de|capital d[aoe])\b/;
+
+/** Engenharia: código Python, projeto de rede de provedor, hardware/Arduino (native/especialidades.ts). */
+async function tecnico(t: Turn, q: Parsed): Promise<string> {
+  const area = dominioTecnico(q.texto) ?? 'python';
+  const r = await responderTecnico(t.conversa, q.original, area, pedidoDeCodigo(q.texto, q.original), (name, input, fn) => t.track(name, input, fn));
+  if (r.modelo) t.modelo = r.modelo;
+  return r.text || geral(t, q);
+}
 
 /** Pergunta de conhecimento geral: pesquisa na web e responde (native/geral.ts). */
 async function geral(t: Turn, q: Parsed): Promise<string> {

@@ -268,7 +268,10 @@ export function useVoice(opts: { serverTranscription: boolean; serverSpeech: boo
   const genRef = useRef(0);                       // muda a cada parada: falas antigas desistem
   const chainRef = useRef<Promise<boolean>>(Promise.resolve(true));
   const pendingRef = useRef(0);                   // falas na fila (para o estado "falando")
-  const serverOkRef = useRef(true);               // voz do servidor falhou: usa a do navegador
+  // Voz do servidor falhou (sessão caiu num reinício, Kokoro carregando…): usa a do navegador
+  // só por um tempo e depois volta a tentar a neural. Antes ficava robótica até recarregar a página.
+  const serverPausaAte = useRef(0);
+  const servidorOk = () => Date.now() >= serverPausaAte.current;
 
   const browserStt = typeof window !== 'undefined' && Boolean(RecognitionCtor());
   const recorderStt = typeof window !== 'undefined' && typeof MediaRecorder !== 'undefined' && Boolean(navigator.mediaDevices?.getUserMedia);
@@ -316,7 +319,10 @@ export function useVoice(opts: { serverTranscription: boolean; serverSpeech: boo
     let last: AudioBufferSourceNode | null = null;
     for (let i = 0; i < parts.length; i++) {
       let buf: AudioBuffer;
-      try { buf = await pending[i]; } catch { serverOkRef.current = i > 0; return { done: false, rest: parts.slice(i) }; }
+      try { buf = await pending[i]; } catch (e) {
+        if (i === 0) { serverPausaAte.current = Date.now() + 45_000; console.warn('[voz] voz do servidor falhou; usando a do navegador por 45 s:', e); }
+        return { done: false, rest: parts.slice(i) };
+      }
       if (gen !== genRef.current) return { done: false, rest: [] };
       want(i + 2);
       const src = c.createBufferSource();
@@ -343,7 +349,7 @@ export function useVoice(opts: { serverTranscription: boolean; serverSpeech: boo
     if (!canSpeak || !text.trim()) return Promise.resolve(true);
     if (!options.append) stopSpeaking();
     const gen = genRef.current;
-    const useServer = opts.serverSpeech && serverOkRef.current;
+    const useServer = opts.serverSpeech && servidorOk();
     // Voz do servidor aguenta trechos longos; a do navegador (Chrome) corta falas acima de ~15 s.
     const parts = useServer ? chunks(text, 160, 480) : chunks(text, 160, 220);
     pendingRef.current++;
@@ -351,7 +357,7 @@ export function useVoice(opts: { serverTranscription: boolean; serverSpeech: boo
     const run = async (): Promise<boolean> => {
       if (gen !== genRef.current) return false;
       let rest = parts;
-      if (useServer && serverOkRef.current) {
+      if (useServer && servidorOk()) {
         const r = await speakServer(parts, gen);
         if (r.done || gen !== genRef.current) return r.done;
         rest = r.rest.length ? chunks(r.rest.join(' '), 160, 220) : [];

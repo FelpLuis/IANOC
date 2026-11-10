@@ -22,7 +22,7 @@ import { adicionarArquivo as kbAdicionar, caminhoArquivo as kbCaminho, listar as
 import { gerarDocumento, lerIdentidade, salvarIdentidade } from './noc/documento.js';
 import { inscreverTv, rodadaDeVoz } from './noc/tv.js';
 import { cancelar as cancelarAcao, confirmar as confirmarAcao } from './noc/acoes.js';
-import { authenticateUpgrade, authEnabled, clientIp, ipAllowed, handleLogin, handleLogout, handleMe, handlePassword, requireAuth, type SessionUser } from './auth.js';
+import { acessoPublico, authenticateUpgrade, authEnabled, clientIp, ipAllowed, handleLogin, handleLogout, handleMe, handlePassword, requireAuth, type SessionUser } from './auth.js';
 import type { IncomingMessage } from 'http';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -65,7 +65,7 @@ const PROJECT_WS_TYPES = new Set(['scan', 'scan_all', 'get_files', 'execute_acti
 app.set('trust proxy', process.env.TRUST_PROXY === 'true');
 // Antes de tudo (inclusive da tela de login): só os IPs liberados em IANOC_ALLOWED_IPS.
 app.use((req, res, next) => {
-  if (ipAllowed(req.socket.remoteAddress, req.headers['x-forwarded-for'])) return next();
+  if (ipAllowed(req.socket.remoteAddress, req.headers['x-forwarded-for'], req.headers['x-forwarded-proto'])) return next();
   console.warn(`[acesso] bloqueado: ${clientIp(req.socket.remoteAddress, req.headers['x-forwarded-for'])} ${req.method} ${req.path}`);
   res.status(403).type('text').send('Acesso não permitido a partir deste endereço.');
 });
@@ -464,7 +464,7 @@ async function handleWebSocketMessage(clientId: string, ws: WebSocket, message: 
       try {
         const response = await agent.chat(
           { ...request, conversationId: request.conversationId || clientId },
-          (event) => { sendToClient(ws, { type: event.type, payload: event }); tv?.evento(event as { type: string; name?: string; dashboard?: unknown }); },
+          (event) => { sendToClient(ws, { type: event.type, payload: event }); tv?.evento(event as Parameters<NonNullable<typeof tv>['evento']>[0]); },
         );
         sendToClient(ws, { type: 'chat_response', payload: response }, requestId);
         tv?.fim(response.message, { modelo: response.metadata?.modelUsed });
@@ -625,7 +625,7 @@ async function startServer() {
     warmKokoro();
     console.log(`🚀 IA NOC Agent server running on http://${HOST}:${PORT}`);
     console.log(`🔐 Login: ${authEnabled ? `usuário do NOC (${nocConfig.noc.baseUrl || 'NOC_API_URL não configurado!'})` : 'DESLIGADO (IANOC_AUTH=off)'}`);
-    console.log(`🛡️  IPs liberados: ${process.env.IANOC_ALLOWED_IPS || 'qualquer um'}`);
+    console.log(`🛡️  IPs liberados: ${process.env.IANOC_ALLOWED_IPS || 'qualquer um'}${acessoPublico ? ' · HTTPS aberto para qualquer rede (IANOC_ACESSO_PUBLICO)' : ''}`);
     console.log(`🗂️  Varredura de projetos: ${PROJECT_TOOLS ? 'ligada' : 'desligada'}`);
     console.log(`📡 WebSocket server ready`);
     console.log(`🌐 CORS enabled for: ${CORS_ORIGIN}`);

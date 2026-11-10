@@ -107,6 +107,7 @@ const TOOL_LABELS: Record<string, string> = {
   web_pesquisa: 'Web · busca e leitura das fontes',
   base_conhecimento: 'Base de conhecimento',
   resposta_geral: 'IA · escrevendo a resposta',
+  resposta_tecnica: 'IA · especialista em engenharia',
 };
 export const toolLabel = (name: string) => TOOL_LABELS[name] ?? name;
 

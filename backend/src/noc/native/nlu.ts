@@ -18,7 +18,7 @@ export type Intent =
   | 'relatorio' | 'dashboard' | 'alarmes' | 'eventos'
   | 'equipamento' | 'conectados' | 'caminho' | 'impacto' | 'topologia' | 'abrir' | 'pesquisa' | 'base' | 'cadastrar'
   | 'onus' | 'opa_fila' | 'opa_resumo' | 'opa_protocolo'
-  | 'os_ixc' | 'cliente' | 'ftth' | 'geral'
+  | 'os_ixc' | 'cliente' | 'ftth' | 'geral' | 'tecnico'
   | 'desconhecido';
 
 export type PeriodoNome = 'agora' | 'hoje' | 'ontem' | 'semana' | 'mes' | 'horas' | 'dias';

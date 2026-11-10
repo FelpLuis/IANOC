@@ -11,7 +11,10 @@
  * ou dos sistemas da UpDown sai por aqui.
  */
 
+import Anthropic from '@anthropic-ai/sdk';
 import { OPENAI_PRESETS } from '../config.js';
+import { buscar as kbBuscar } from '../kb.js';
+import { buscarEspecialidades, DOMINIO_NOME, type Dominio } from './especialidades.js';
 import { pesquisarWeb, resumoWikipedia, type SearchResult } from '../web/research.js';
 import { horaLocal } from '../http.js';
 import { norm } from './nlu.js';
@@ -145,7 +148,7 @@ export function dataHora(original: string): string | null {
 
 // ------------------------------------------------------------------ modelo de linguagem (opcional)
 
-interface LlmCfg { baseUrl: string; apiKey: string; model: string; reasoning?: string }
+interface LlmCfg { baseUrl: string; apiKey: string; model: string; reasoning?: string; maxTokens?: number }
 
 /**
  * Modelo para perguntas gerais. IANOC_GERAL_LLM escolhe o provedor (groq, gemini, openrouter,
@@ -170,7 +173,7 @@ async function chat(cfg: LlmCfg, messages: Msg[]): Promise<string> {
   const r = await fetch(`${cfg.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}) },
-    body: JSON.stringify({ model: cfg.model, messages, max_tokens: 2048, temperature: 0.4, ...(cfg.reasoning ? { reasoning_effort: cfg.reasoning } : {}) }),
+    body: JSON.stringify({ model: cfg.model, messages, max_tokens: cfg.maxTokens ?? 2048, temperature: 0.4, ...(cfg.reasoning ? { reasoning_effort: cfg.reasoning } : {}) }),
     signal: AbortSignal.timeout(Number(process.env.IANOC_GERAL_TIMEOUT_MS || 45000)),
   });
   if (!r.ok) throw new Error(`modelo respondeu HTTP ${r.status}`);
@@ -263,4 +266,123 @@ export async function responderGeral(sessionId: string, pergunta: string, track:
     };
   }
   return { text: '' };
+}
+
+// ------------------------------------------------------------------ especialista técnico
+
+/**
+ * Modelo para perguntas de engenharia (código, projeto de rede, hardware). Com
+ * ANTHROPIC_API_KEY no servidor usa o Claude (padrão claude-opus-5-5, o mesmo modelo do
+ * agente de desenvolvimento); sem ela, o modelo das perguntas gerais (llmGeral).
+ * IANOC_DEV_LLM=anthropic|geral|nao força a escolha; IANOC_DEV_MODEL troca o modelo Claude.
+ */
+export function llmTecnico(): { tipo: 'anthropic'; model: string } | { tipo: 'geral'; cfg: LlmCfg } | null {
+  const escolha = (process.env.IANOC_DEV_LLM || '').trim().toLowerCase();
+  if (/^(0|n|nao|não|off|false|no)$/.test(escolha)) return null;
+  const temClaude = Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
+  if (escolha === 'anthropic' || (escolha !== 'geral' && temClaude)) return { tipo: 'anthropic', model: (process.env.IANOC_DEV_MODEL || 'claude-opus-5-5').trim() };
+  const cfg = llmGeral();
+  return cfg ? { tipo: 'geral', cfg } : null;
+}
+
+let claude: Anthropic | null = null;
+
+/** Claude com pensamento adaptativo, streaming (respostas longas de código) e fallback de recusa. */
+async function chatClaude(model: string, sistema: string, mensagens: Msg[], esforco: 'medium' | 'high'): Promise<string> {
+  claude ??= new Anthropic({ timeout: Number(process.env.IANOC_DEV_TIMEOUT_MS || 240_000), maxRetries: 1 });
+  const stream = claude.beta.messages.stream({
+    model,
+    max_tokens: 32000,
+    betas: ['server-side-fallback-2026-07-01'],
+    fallbacks: 'default',
+    thinking: { type: 'adaptive' },
+    output_config: { effort: esforco },
+    system: [{ type: 'text', text: sistema, cache_control: { type: 'ephemeral' } }],
+    messages: mensagens.filter((m) => m.role !== 'system').map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+  });
+  const final = await stream.finalMessage();
+  if (final.stop_reason === 'refusal') throw new Error('o modelo recusou a solicitação');
+  const texto = final.content.map((b) => (b.type === 'text' ? b.text : '')).join('').trim();
+  if (!texto) throw new Error('o modelo não devolveu texto');
+  return texto;
+}
+
+const SISTEMA_TECNICO: Record<Dominio, string> = {
+  python: [
+    'Você é engenheiro(a) de software sênior especializado(a) em automação e monitoramento de redes de provedores (NOC).',
+    'Escreva código Python 3.10+ completo, correto e pronto para rodar: tipado, com comentários curtos em português, logging, timeouts em toda chamada de rede, tratamento de erro por host e credenciais só por variáveis de ambiente (nunca no código).',
+    'Scripts que alteram equipamentos ou cadastros: somente leitura por padrão, com flag explícita (--aplicar) para executar.',
+    'Diga como instalar e rodar (venv, pip install com as bibliotecas exatas, variáveis de ambiente, agendamento com systemd timer quando fizer sentido). Se houver ambiguidade importante, assuma o mais comum e diga o que assumiu.',
+  ].join('\n'),
+  redes: [
+    'Você é arquiteto(a) de redes sênior de provedores de internet no Brasil (FTTH/GPON, backbone IP/MPLS, BGP com operadoras e IX.br).',
+    'Responda com rigor técnico: cite boas práticas (MANRS, BCP 38, RFCs relevantes), mostre os cálculos passo a passo (orçamento óptico, capacidade, endereçamento) e deixe claros os valores de referência e as premissas.',
+    'Considere o contexto brasileiro (NIC.br/Registro.br, IX.br, Anatel/SCM, guarda de logs do Marco Civil, LGPD). Quando houver comando de equipamento, diga para qual fabricante/sistema é.',
+  ].join('\n'),
+  hardware: [
+    'Você é engenheiro(a) de eletrônica e sistemas embarcados (Arduino, ESP32, sensores) que monta soluções para POPs e racks de provedores.',
+    'Sempre: lista de materiais, ligações pino a pino, níveis de tensão (3,3 V × 5 V), segurança elétrica (nunca rede AC direto na placa; fusíveis em baterias) e código completo para Arduino IDE/PlatformIO com as bibliotecas exatas.',
+    'Prefira integração com o Zabbix (HTTP agent lendo JSON, trapper ou MQTT) e montagem confiável em campo (watchdog, reconexão, fonte de qualidade).',
+  ].join('\n'),
+};
+
+const PRIMEIRA_FRASE = 'Comece direto com uma ou duas frases que resumem a resposta, sem título nem rótulo antes delas (são lidas em voz alta); depois detalhe em Markdown, com blocos de código marcados com a linguagem. Use a base de conhecimento da NIA quando ela for relevante, mas corrija-a se souber que algo está desatualizado.';
+
+/** Resposta de engenharia: guias da NIA + documentos da equipe + (opcional) web, escrita pelo especialista. */
+export async function responderTecnico(sessionId: string, pergunta: string, dominio: Dominio, codigo: boolean, track: Track): Promise<RespostaGeral> {
+  const guias = buscarEspecialidades(pergunta, dominio, codigo ? 3 : 4);
+  const equipe = kbBuscar(pergunta, 2);
+  const modelo = llmTecnico();
+  // Código não precisa de busca na web (a base e o modelo bastam); projeto e hardware podem citar fontes.
+  const fontes: SearchResult[] = !codigo && modelo
+    ? (await track('web_pesquisa', { tema: pergunta, modo: 'tecnico' }, () => pesquisarWeb(pergunta, 4, false)).catch(() => ({ results: [] as SearchResult[] }))).results.slice(0, 4)
+    : [];
+
+  const base = [
+    ...guias.map((s) => `### ${s.guia} › ${s.titulo}\n${s.texto.slice(0, 2400)}`),
+    ...equipe.map((h) => `### Documento da equipe: ${h.nome}\n${h.trecho}`),
+  ].join('\n\n');
+  const web = fontes.length ? `\n\nResultados da busca na web:\n${fontes.map((f, i) => `[${i + 1}] ${f.title} — ${f.url}\n${f.snippet.slice(0, 500)}`).join('\n\n')}` : '';
+  const rodapeBase = guias.length ? `_Base da NIA: ${[...new Set(guias.map((s) => `${s.guia} › ${s.titulo}`))].slice(0, 3).join(' · ')}_` : '';
+
+  if (modelo) {
+    const sistema = [
+      `Você é a ${NOME}, assistente do NOC da UpDown Internet, agora atuando como especialista em ${DOMINIO_NOME[dominio]}.`,
+      SISTEMA_TECNICO[dominio],
+      PRIMEIRA_FRASE,
+      'Nunca invente dados da rede da UpDown (alarmes, clientes, IPs reais): use exemplos claramente fictícios ou peça os dados.',
+      fontes.length ? 'Quando usar um resultado da web, cite com [n]. Não escreva lista de fontes no final.' : '',
+    ].filter(Boolean).join('\n\n');
+    const hist = historicos.get(sessionId) ?? [];
+    const conteudo = `${pergunta}${base ? `\n\nBase de conhecimento da NIA (trechos relevantes):\n\n${base}` : ''}${web}`;
+    try {
+      let resposta: string;
+      let nome: string;
+      if (modelo.tipo === 'anthropic') {
+        nome = modelo.model;
+        resposta = await track('resposta_tecnica', { modelo: nome, area: dominio }, () => chatClaude(modelo.model, sistema, [...hist, { role: 'user', content: conteudo }], codigo ? 'high' : 'medium'));
+      } else {
+        nome = modelo.cfg.model;
+        resposta = await track('resposta_tecnica', { modelo: nome, area: dominio }, () => chat({ ...modelo.cfg, maxTokens: 4500 }, [{ role: 'system', content: sistema }, ...hist, { role: 'user', content: conteudo }]));
+      }
+      hist.push({ role: 'user', content: pergunta }, { role: 'assistant', content: resposta.slice(0, 6000) });
+      historicos.set(sessionId, hist.slice(-8));
+      const citadas = new Set([...resposta.matchAll(/\[(\d)\]/g)].map((m) => Number(m[1])));
+      const rodape = [citadas.size ? listaFontes(fontes, citadas) : '', rodapeBase].filter(Boolean).join('\n\n');
+      return { text: rodape ? `${resposta}\n\n${rodape}` : resposta, modelo: nome };
+    } catch (e) {
+      console.warn(`[nia] especialista sem modelo (${e instanceof Error ? e.message : e}); respondendo pela base`);
+    }
+  }
+
+  // Sem modelo: os trechos da base, organizados.
+  if (!guias.length) return { text: '' };
+  return {
+    text: [
+      `Da base técnica da NIA sobre ${DOMINIO_NOME[dominio]}, o mais relevante para a sua pergunta:`,
+      ...guias.slice(0, 2).map((s) => `## ${s.titulo}\n\n${s.texto.replace(/^##\s+.+\n/, '')}`),
+      '> Para respostas escritas sob medida (código completo, cálculos do seu caso), configure um modelo de IA no servidor: ANTHROPIC_API_KEY para o Claude Opus 5.5, ou LLM_API_KEY.',
+      rodapeBase,
+    ].filter(Boolean).join('\n\n'),
+  };
 }

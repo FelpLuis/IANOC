@@ -214,3 +214,58 @@ export function montarDashboard(o: {
     indisponiveis: o.indisponiveis,
   };
 }
+
+/**
+ * Dashboard das respostas de alarmes ("o que está com alarme agora?"): indicadores, rosca por
+ * severidade, hosts e causas, e a tabela dos alarmes — os mesmos números do Zabbix da resposta.
+ */
+export function dashboardDeAlarmes(o: {
+  problems: Array<{ host: string; problema: string; severidade: string; desde?: string; reconhecido?: boolean }>;
+  severidade: string; onde: string; causasClientes: Record<string, number>; losRecentes: number;
+}): Dashboard {
+  const ps = o.problems;
+  const clientes = ps.filter((p) => /^o cliente\b/i.test(p.problema));
+  const infra = ps.filter((p) => !/^o cliente\b/i.test(p.problema));
+  const desastres = ps.filter((p) => p.severidade === 'desastre').length;
+  const semAck = ps.filter((p) => p.reconhecido === false).length;
+  const hosts = new Set(infra.map((p) => p.host)).size;
+  const tom: Tom = desastres || o.losRecentes >= 5 ? 'critico' : ps.length ? 'atencao' : 'ok';
+
+  const porSev: Record<string, number> = {};
+  for (const p of ps) porSev[p.severidade] = (porSev[p.severidade] ?? 0) + 1;
+  const porHost: Record<string, number> = {};
+  for (const p of infra) porHost[p.host] = (porHost[p.host] ?? 0) + 1;
+  const ord = [...ps].sort((x, y) => ORDEM_SEV.indexOf(x.severidade) - ORDEM_SEV.indexOf(y.severidade));
+
+  const graficos: Grafico[] = [];
+  const sev = ORDEM_SEV.map((s) => ({ rotulo: s, valor: porSev[s] ?? 0, cor: SEVERIDADE_COR[s] })).filter((s) => s.valor);
+  if (sev.length) graficos.push({ id: 'al-sev', tipo: 'rosca', grupo: 'Rede', titulo: 'Alarmes por severidade', series: sev });
+  const topHosts = doMapa(porHost, 8);
+  if (topHosts.length) graficos.push({ id: 'al-hosts', tipo: 'barras_h', grupo: 'Rede', titulo: 'Hosts com mais alarmes', series: topHosts });
+  const causas = doMapa(o.causasClientes, 6);
+  if (causas.length) graficos.push({ id: 'al-causas', tipo: 'barras', grupo: 'Clientes', titulo: 'Clientes desconectados por causa', series: causas });
+
+  return {
+    id: randomUUID().slice(0, 8),
+    titulo: 'Alarmes agora',
+    periodo: `severidade ${o.severidade}${o.onde}`,
+    intervalo: `situação de ${horaLocal(new Date()).slice(11, 16)}`,
+    geradoEm: horaLocal(new Date()).slice(0, 16),
+    fontes: ['Zabbix'],
+    status: tom === 'critico' ? { tom, texto: 'Crítico' } : tom === 'atencao' ? { tom, texto: 'Atenção' } : { tom, texto: 'Tudo verde' },
+    kpis: [
+      { id: 'al-total', rotulo: 'Alarmes abertos', valor: n(ps.length), detalhe: `${n(infra.length)} infra · ${n(clientes.length)} clientes`, tom, icone: 'siren' },
+      { id: 'al-desastre', rotulo: 'Desastres', valor: n(desastres), detalhe: desastres ? 'prioridade máxima' : 'nenhum agora', tom: desastres ? 'critico' : 'ok', icone: 'activity' },
+      { id: 'al-ack', rotulo: 'Sem reconhecimento', valor: n(semAck), detalhe: semAck ? 'alarmes sem dono' : 'todos com responsável', tom: semAck ? 'atencao' : 'ok', icone: 'clock' },
+      { id: 'al-hosts', rotulo: 'Hosts de infra afetados', valor: n(hosts), detalhe: infra[0] ? `1º: ${corta(infra[0].host, 30)}` : '—', tom: hosts ? 'info' : 'ok', icone: 'timer' },
+      ...(o.losRecentes ? [{ id: 'al-los', rotulo: 'LOS em 30 min', valor: n(o.losRecentes), detalhe: o.losRecentes >= 5 ? 'possível rompimento' : 'clientes', tom: (o.losRecentes >= 5 ? 'critico' : 'atencao') as Tom, icone: 'siren' }] : []),
+    ],
+    graficos,
+    tabelas: ord.length ? [{
+      grupo: 'Rede', titulo: `Alarmes (${n(ps.length)})`, colunas: ['Severidade', 'Host', 'Problema', 'Desde', 'Rec.'],
+      linhas: ord.slice(0, 15).map((p) => [p.severidade, corta(p.host, 40), corta(p.problema, 90), p.desde ?? '—', p.reconhecido ? 'sim' : 'não']),
+      tons: ord.slice(0, 15).map((p) => (p.severidade === 'desastre' ? 'critico' : 'atencao')),
+    }] : [],
+    destaques: [], recomendacoes: [], indisponiveis: [],
+  };
+}

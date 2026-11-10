@@ -375,3 +375,14 @@
 .tv-prose th { text-align: left; padding: 0.6em 0.9em; font-family: "JetBrains Mono", monospace; text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.85em; color: #9be3f8; background: linear-gradient(90deg, rgba(18, 186, 234, 0.16), rgba(164, 10, 232, 0.12)); }
 .tv-prose td { padding: 0.55em 0.9em; border-top: 1px solid rgba(91, 140, 255, 0.1); }
 .tv-prose tbody tr:nth-child(even) td { background: rgba(18, 186, 234, 0.04); }
+.tv-slide {
+  background: linear-gradient(180deg, rgba(10, 6, 40, 0.78), rgba(10, 6, 40, 0.62));
+  border: 1px solid rgba(18, 186, 234, 0.25);
+  box-shadow: 0 0 60px -24px rgba(18, 186, 234, 0.8);
+  backdrop-filter: blur(10px);
+}
+.tv-legenda {
+  background: linear-gradient(90deg, rgba(10, 6, 40, 0.92), rgba(26, 0, 168, 0.55) 60%, rgba(164, 10, 232, 0.35));
+  border: 1px solid rgba(18, 186, 234, 0.25);
+  box-shadow: 0 -10px 40px -20px rgba(18, 186, 234, 0.6);
+}

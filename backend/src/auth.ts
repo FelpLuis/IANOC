@@ -73,8 +73,23 @@ export function clientIp(remote: string | undefined, forwarded: string | string[
   return ip;
 }
 
-export function ipAllowed(remote: string | undefined, forwarded?: string | string[]): boolean {
+/**
+ * IANOC_ACESSO_PUBLICO=sim: quem chega pelo HTTPS do próprio servidor (Caddy, conexão local
+ * com X-Forwarded-For e X-Forwarded-Proto https) entra de qualquer rede — o login protege.
+ * A porta HTTP direta (sem criptografia) continua só para os IPs de IANOC_ALLOWED_IPS.
+ */
+const ACESSO_PUBLICO = /^(1|s|sim|true|yes|on)$/i.test((process.env.IANOC_ACESSO_PUBLICO || '').trim());
+export const acessoPublico = ACESSO_PUBLICO;
+
+function viaHttpsLocal(remote: string | undefined, forwarded?: string | string[], proto?: string | string[]) {
+  const ip = String(remote || '').replace(/^::ffff:/, '');
+  const p = (Array.isArray(proto) ? proto.join(',') : proto || '').toLowerCase();
+  return loopback(ip) && Boolean(forwarded) && p.split(',').map((s) => s.trim()).includes('https');
+}
+
+export function ipAllowed(remote: string | undefined, forwarded?: string | string[], proto?: string | string[]): boolean {
   if (!ALLOWED_IPS.length) return true;
+  if (ACESSO_PUBLICO && viaHttpsLocal(remote, forwarded, proto)) return true;
   const ip = clientIp(remote, forwarded);
   if (loopback(ip)) return true; // health check local do install.sh (sem X-Forwarded-For)
   return ALLOWED_IPS.some((rule) => {
@@ -91,14 +106,20 @@ export function ipAllowed(remote: string | undefined, forwarded?: string | strin
 
 const attempts = new Map<string, { count: number; resetAt: number }>();
 const MAX_ATTEMPTS = 10, WINDOW_MS = 15 * 60_000;
+// Erros de senha por usuário, de qualquer IP: freia tentativa distribuída contra o mesmo login.
+const MAX_FALHAS_USUARIO = 30;
 
-function tooManyAttempts(ip: string) {
+function tooManyAttempts(chave: string, max = MAX_ATTEMPTS) {
   const now = Date.now();
-  const a = attempts.get(ip);
-  if (!a || a.resetAt < now) { attempts.set(ip, { count: 1, resetAt: now + WINDOW_MS }); return false; }
+  const a = attempts.get(chave);
+  if (!a || a.resetAt < now) { attempts.set(chave, { count: 1, resetAt: now + WINDOW_MS }); return false; }
   a.count++;
-  return a.count > MAX_ATTEMPTS;
+  return a.count > max;
 }
+const bloqueado = (chave: string, max = MAX_ATTEMPTS) => { const a = attempts.get(chave); return Boolean(a && a.resetAt >= Date.now() && a.count > max); };
+
+/** IP real de quem chamou (atrás do Caddy, o do cabeçalho; senão, o da conexão). */
+const ipDe = (req: Request) => clientIp(req.socket.remoteAddress, req.headers['x-forwarded-for']);
 
 // ---------------------------------------------------------------- NOC
 
@@ -137,22 +158,26 @@ export async function sessionFromCookie(cookieHeader: string | undefined): Promi
   return (await sessionRecord(cookieHeader))?.user ?? null;
 }
 
-function cookie(value: string, maxAgeS: number) {
-  return `${COOKIE}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeS}${COOKIE_SECURE ? '; Secure' : ''}`;
+// Pelo HTTPS (Caddy) o cookie sai com Secure: o navegador nunca o manda em HTTP aberto.
+function cookie(value: string, maxAgeS: number, req?: Request) {
+  const seguro = COOKIE_SECURE || (req ? viaHttpsLocal(req.socket.remoteAddress, req.headers['x-forwarded-for'], req.headers['x-forwarded-proto']) : false);
+  return `${COOKIE}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeS}${seguro ? '; Secure' : ''}`;
 }
 
 // ---------------------------------------------------------------- rotas
 
 export async function handleLogin(req: Request, res: Response) {
   if (!authEnabled) return res.json({ ok: true, user: { username: 'dev', role: 'administrador' } });
-  if (tooManyAttempts(req.ip || 'desconhecido')) return res.status(429).json({ error: 'Muitas tentativas. Aguarde 15 minutos.' });
+  if (tooManyAttempts(ipDe(req))) return res.status(429).json({ error: 'Muitas tentativas. Aguarde 15 minutos.' });
 
   const username = String(req.body?.username || '').trim();
   const password = String(req.body?.password || '');
   if (!username || !password) return res.status(400).json({ error: 'Informe usuário e senha.' });
+  const chaveUsuario = `usuario:${username.toLowerCase()}`;
+  if (bloqueado(chaveUsuario, MAX_FALHAS_USUARIO)) return res.status(429).json({ error: 'Muitas tentativas para este usuário. Aguarde 15 minutos.' });
 
   if (SOMENTE_ADMIN && (!ADMIN_USER || username.toLowerCase() !== ADMIN_USER)) {
-    console.warn(`[auth] login recusado (só ${ADMIN_USER || 'o usuário do .env'} entra): ${username} (${req.ip})`);
+    console.warn(`[auth] login recusado (só ${ADMIN_USER || 'o usuário do .env'} entra): ${username} (${ipDe(req)})`);
     return res.status(401).json({ error: 'Usuário ou senha inválidos.' });
   }
 
@@ -160,15 +185,16 @@ export async function handleLogin(req: Request, res: Response) {
   const local = autenticarLocal(username, password);
   if (local) {
     if (!('user' in local)) {
-      console.warn(`[auth] senha local incorreta: ${username} (${req.ip})`);
+      console.warn(`[auth] senha local incorreta: ${username} (${ipDe(req)})`);
+      tooManyAttempts(chaveUsuario, MAX_FALHAS_USUARIO);
       return res.status(401).json({ error: 'Usuário ou senha inválidos.' });
     }
     const id = randomBytes(32).toString('hex');
     const user: SessionUser = { id: `local:${local.user.username}`, username: local.user.username, display_name: local.user.display_name, role: local.user.role };
     sessions.set(id, { user, nocToken: '', expiresAt: Date.now() + SESSION_MS, checkedAt: Date.now(), local: true, mustChange: local.user.mustChange });
-    attempts.delete(req.ip || 'desconhecido');
-    console.log(`[auth] login local: ${user.username} de ${req.ip}${local.user.mustChange ? ' (troca de senha pendente)' : ''}`);
-    res.setHeader('Set-Cookie', cookie(id, Math.floor(SESSION_MS / 1000)));
+    attempts.delete(ipDe(req));
+    console.log(`[auth] login local: ${user.username} de ${ipDe(req)}${local.user.mustChange ? ' (troca de senha pendente)' : ''}`);
+    res.setHeader('Set-Cookie', cookie(id, Math.floor(SESSION_MS / 1000), req));
     return res.json({ ok: true, user, mustChangePassword: local.user.mustChange });
   }
 
@@ -190,7 +216,8 @@ export async function handleLogin(req: Request, res: Response) {
 
   if (status === 429) return res.status(429).json({ error: 'O NOC bloqueou novas tentativas para este usuário. Aguarde 15 minutos.' });
   if (status !== 200 || !data.token || !data.user) {
-    console.warn(`[auth] login recusado: ${username} (${req.ip})`);
+    console.warn(`[auth] login recusado: ${username} (${ipDe(req)})`);
+    tooManyAttempts(chaveUsuario, MAX_FALHAS_USUARIO);
     return res.status(401).json({ error: 'Usuário ou senha inválidos.' });
   }
   if (data.user.must_change_password) {
@@ -205,9 +232,9 @@ export async function handleLogin(req: Request, res: Response) {
   const id = randomBytes(32).toString('hex');
   const user: SessionUser = { id: data.user.id, username: data.user.username, display_name: data.user.display_name, role };
   sessions.set(id, { user, nocToken: data.token, expiresAt: Date.now() + SESSION_MS, checkedAt: Date.now() });
-  attempts.delete(req.ip || 'desconhecido');
-  console.log(`[auth] login: ${user.username} (${role}) de ${req.ip}`);
-  res.setHeader('Set-Cookie', cookie(id, Math.floor(SESSION_MS / 1000)));
+  attempts.delete(ipDe(req));
+  console.log(`[auth] login: ${user.username} (${role}) de ${ipDe(req)}`);
+  res.setHeader('Set-Cookie', cookie(id, Math.floor(SESSION_MS / 1000), req));
   res.json({ ok: true, user });
 }
 
@@ -226,7 +253,7 @@ export async function handlePassword(req: Request, res: Response) {
   if (!id || !s) return res.status(401).json({ error: 'AUTH_REQUIRED' });
   if (!s.local) return res.status(400).json({ error: 'Troque a senha no sistema NOC.' });
   if (senhaFixa && s.user.username.toLowerCase() === ADMIN_USER) return res.status(400).json({ error: 'A senha deste usuário é fixa (definida no servidor).' });
-  if (tooManyAttempts(`senha:${req.ip}`)) return res.status(429).json({ error: 'Muitas tentativas. Aguarde 15 minutos.' });
+  if (tooManyAttempts(`senha:${ipDe(req)}`)) return res.status(429).json({ error: 'Muitas tentativas. Aguarde 15 minutos.' });
   const atual = String(req.body?.current || '');
   const nova = String(req.body?.next || '');
   const erro = trocarSenhaLocal(s.user.username, atual, nova);
@@ -234,7 +261,7 @@ export async function handlePassword(req: Request, res: Response) {
   // Outras sessões deste usuário caem; a atual continua, já sem pendência.
   for (const [sid, other] of sessions) if (sid !== id && other.local && other.user.username === s.user.username) sessions.delete(sid);
   s.mustChange = false;
-  console.log(`[auth] senha trocada: ${s.user.username} (${req.ip})`);
+  console.log(`[auth] senha trocada: ${s.user.username} (${ipDe(req)})`);
   res.json({ ok: true });
 }
 
@@ -243,7 +270,7 @@ export async function handleLogout(req: Request, res: Response) {
   const s = id ? sessions.get(id) : undefined;
   if (id) sessions.delete(id);
   if (s) nocFetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${s.nocToken}` } }).catch(() => {});
-  res.setHeader('Set-Cookie', cookie('', 0));
+  res.setHeader('Set-Cookie', cookie('', 0, req));
   res.json({ ok: true });
 }
 
@@ -259,7 +286,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 
 /** Autentica o upgrade do WebSocket: cookie de sessão válido e mesma origem. */
 export async function authenticateUpgrade(req: IncomingMessage): Promise<SessionUser | null> {
-  if (!ipAllowed(req.socket.remoteAddress, req.headers['x-forwarded-for'])) return null;
+  if (!ipAllowed(req.socket.remoteAddress, req.headers['x-forwarded-for'], req.headers['x-forwarded-proto'])) return null;
   if (!authEnabled) return { id: 0, username: 'dev', role: 'administrador' };
   const origin = req.headers.origin;
   if (origin && new URL(origin).host !== req.headers.host) return null;
