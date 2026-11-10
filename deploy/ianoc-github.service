@@ -1,0 +1,10 @@
+[Unit]
+Description=NIA - atualiza a partir do GitHub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ianoc-atualizar
+TimeoutStartSec=30min
+Nice=10

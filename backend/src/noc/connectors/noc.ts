@@ -37,6 +37,31 @@ async function ensureToken(forceRenew = false): Promise<string> {
   return sessionToken;
 }
 
+/**
+ * Escrita no sistema NOC: só as rotas de cadastro, e só chamada por acoes.ts depois que
+ * um administrador confirma na tela. O NOC confere a permissão de cada mudança e grava a
+ * própria auditoria. Nada de exclusão.
+ */
+const ESCRITA_NOC = new Set(['POST /api/clientes', 'POST /api/locais', 'PUT /api/topology']);
+export async function nocSend<T = unknown>(method: 'POST' | 'PUT', pathname: string, body: unknown): Promise<T> {
+  if (!ESCRITA_NOC.has(`${method} ${pathname}`)) throw new ConnectorError('noc', `${method} ${pathname} não é permitido para a NIA.`);
+  const url = new URL(pathname, `${nocConfig.noc.baseUrl}/`).toString();
+  const call = async (token: string) => (await fetchJson<T>('noc', url, {
+    method,
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })).data;
+  try {
+    return await call(await ensureToken());
+  } catch (error) {
+    if (error instanceof ConnectorError && error.status === 401 && nocConfig.noc.username) return call(await ensureToken(true));
+    if (error instanceof ConnectorError && error.status === 403) {
+      throw new ConnectorError('noc', `o usuário de serviço não tem permissão para ${method} ${pathname} (${error.message}). Rode "npm run noc:criar-usuario -- --escrita" para dar as permissões de cadastro.`, 403);
+    }
+    throw error;
+  }
+}
+
 /** GET autenticado. Renova a sessão uma vez em 401 (sessão expirada após SESSION_HOURS). */
 export async function nocGet<T = unknown>(pathname: string, params: Record<string, string | number | undefined> = {}): Promise<T> {
   const url = new URL(pathname, `${nocConfig.noc.baseUrl}/`);

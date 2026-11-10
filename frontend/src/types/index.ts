@@ -246,6 +246,7 @@ export interface Message {
   topology?: TopologyGraph;
   // Páginas que a NIA abriu (ou tentou abrir) no navegador para esta resposta.
   actions?: Array<{ url: string; label: string; opened: boolean }>;
+  pendentes?: AcaoPendente[];
 }
 
 export interface MessageMetadata {
@@ -353,6 +354,7 @@ export type WSMessageType =
   | 'ping'
   | 'tool_start'
   | 'open_url'
+  | 'pending_action'
   | 'tool_end'
   | 'conversation_reset'
   | 'pong';
@@ -410,4 +412,14 @@ export interface TopologyGraph {
   fonte: string;
   geradoEm: string;
   resumo: { equipamentos: number; enlaces: number; inferidos: number; comAlarme: number; hostsZabbix: number; alarmesClientes: number; erros?: string[] };
+}
+
+// Cadastro proposto pela NIA, aguardando confirmação (backend/src/noc/acoes.ts).
+export interface AcaoPendente {
+  id: string;
+  tipo: 'zabbix_host' | 'noc_cliente' | 'noc_pop' | 'noc_equipamento' | 'noc_enlace';
+  titulo: string;
+  campos: Array<{ rotulo: string; valor: string }>;
+  avisos: string[];
+  expiraEm: number;
 }

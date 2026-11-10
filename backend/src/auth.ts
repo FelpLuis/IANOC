@@ -6,7 +6,8 @@
  * poucos minutos a sessão é reconferida no /api/auth/me do NOC — usuário
  * desativado lá perde o acesso aqui.
  *
- * IANOC_AUTH=noc liga (padrão em produção); IANOC_AUTH=off desliga (desenvolvimento).
+ * IANOC_AUTH=noc liga (padrão em produção); IANOC_AUTH=local aceita só o usuário de
+ * IANOC_ADMIN_USER (ex.: NOC), sem login do sistema NOC; IANOC_AUTH=off desliga (desenvolvimento).
  *
  * Usuários locais (local-users.ts, ex.: administrador master) são conferidos antes do NOC.
  * Com troca de senha pendente, a sessão só acessa /api/auth/* até a senha ser trocada.
@@ -16,7 +17,7 @@ import { randomBytes } from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
 import type { IncomingMessage } from 'node:http';
 import { nocConfig } from './noc/config.js';
-import { autenticarLocal, semearAdmin, trocarSenhaLocal } from './local-users.js';
+import { autenticarLocal, semearAdmin, senhaFixa, trocarSenhaLocal } from './local-users.js';
 
 export interface SessionUser { id: number | string; username: string; display_name?: string; role: string }
 interface Session { user: SessionUser; nocToken: string; expiresAt: number; checkedAt: number; local?: boolean; mustChange?: boolean }
@@ -30,7 +31,12 @@ const COOKIE_SECURE = /^(1|true|sim)$/i.test(process.env.COOKIE_SECURE || '');
 const ALLOWED_ROLES = (process.env.IANOC_ALLOWED_ROLES || 'administrador,analista,tecnico,atendimento,logistica')
   .split(',').map((r) => r.trim().toLowerCase()).filter((r) => r && r !== 'cliente');
 
-export const authEnabled = (process.env.IANOC_AUTH || (process.env.NODE_ENV === 'production' ? 'noc' : 'off')) !== 'off';
+const AUTH_MODE = (process.env.IANOC_AUTH || (process.env.NODE_ENV === 'production' ? 'noc' : 'off')).trim().toLowerCase();
+export const authEnabled = AUTH_MODE !== 'off';
+// IANOC_AUTH=local: só o usuário de IANOC_ADMIN_USER entra (ex.: NOC); o login do sistema NOC
+// e os demais usuários locais ficam desligados.
+const SOMENTE_ADMIN = AUTH_MODE === 'local';
+const ADMIN_USER = (process.env.IANOC_ADMIN_USER || '').trim().toLowerCase();
 
 const sessions = new Map<string, Session>();
 
@@ -49,10 +55,28 @@ function ipv4ToInt(ip: string) {
     : null;
 }
 
-export function ipAllowed(remote: string | undefined): boolean {
-  if (!ALLOWED_IPS.length) return true;
+const loopback = (ip: string) => ip === '127.0.0.1' || ip === '::1';
+
+/**
+ * IP real do cliente. Atrás do Caddy (HTTPS no subdomínio) a conexão vem de 127.0.0.1 e o
+ * IP do cliente chega em X-Forwarded-For; o Caddy descarta o cabeçalho que o cliente mandar
+ * e acrescenta o endereço verdadeiro no fim, então vale o último da lista. Só se confia no
+ * cabeçalho quando a conexão é local (o próprio Caddy).
+ */
+export function clientIp(remote: string | undefined, forwarded: string | string[] | undefined): string {
   const ip = String(remote || '').replace(/^::ffff:/, '');
-  if (ip === '127.0.0.1' || ip === '::1') return true; // health check local do install.sh
+  const xff = Array.isArray(forwarded) ? forwarded.join(',') : forwarded;
+  if (loopback(ip) && xff) {
+    const ultimo = xff.split(',').map((s) => s.trim()).filter(Boolean).pop();
+    if (ultimo) return ultimo.replace(/^::ffff:/, '');
+  }
+  return ip;
+}
+
+export function ipAllowed(remote: string | undefined, forwarded?: string | string[]): boolean {
+  if (!ALLOWED_IPS.length) return true;
+  const ip = clientIp(remote, forwarded);
+  if (loopback(ip)) return true; // health check local do install.sh (sem X-Forwarded-For)
   return ALLOWED_IPS.some((rule) => {
     const [base, bits] = rule.split('/');
     if (!bits) return base === ip;
@@ -127,6 +151,11 @@ export async function handleLogin(req: Request, res: Response) {
   const password = String(req.body?.password || '');
   if (!username || !password) return res.status(400).json({ error: 'Informe usuário e senha.' });
 
+  if (SOMENTE_ADMIN && (!ADMIN_USER || username.toLowerCase() !== ADMIN_USER)) {
+    console.warn(`[auth] login recusado (só ${ADMIN_USER || 'o usuário do .env'} entra): ${username} (${req.ip})`);
+    return res.status(401).json({ error: 'Usuário ou senha inválidos.' });
+  }
+
   // Usuário local (administrador master etc.) vem antes do NOC.
   const local = autenticarLocal(username, password);
   if (local) {
@@ -143,7 +172,7 @@ export async function handleLogin(req: Request, res: Response) {
     return res.json({ ok: true, user, mustChangePassword: local.user.mustChange });
   }
 
-  if (!nocConfig.noc.baseUrl) return res.status(401).json({ error: 'Usuário ou senha inválidos.' });
+  if (SOMENTE_ADMIN || !nocConfig.noc.baseUrl) return res.status(401).json({ error: 'Usuário ou senha inválidos.' });
 
   let data: { token?: string; user?: SessionUser & { must_change_password?: boolean }; error?: string };
   let status: number;
@@ -196,6 +225,7 @@ export async function handlePassword(req: Request, res: Response) {
   const s = await sessionRecord(req.headers.cookie);
   if (!id || !s) return res.status(401).json({ error: 'AUTH_REQUIRED' });
   if (!s.local) return res.status(400).json({ error: 'Troque a senha no sistema NOC.' });
+  if (senhaFixa && s.user.username.toLowerCase() === ADMIN_USER) return res.status(400).json({ error: 'A senha deste usuário é fixa (definida no servidor).' });
   if (tooManyAttempts(`senha:${req.ip}`)) return res.status(429).json({ error: 'Muitas tentativas. Aguarde 15 minutos.' });
   const atual = String(req.body?.current || '');
   const nova = String(req.body?.next || '');
@@ -229,7 +259,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 
 /** Autentica o upgrade do WebSocket: cookie de sessão válido e mesma origem. */
 export async function authenticateUpgrade(req: IncomingMessage): Promise<SessionUser | null> {
-  if (!ipAllowed(req.socket.remoteAddress)) return null;
+  if (!ipAllowed(req.socket.remoteAddress, req.headers['x-forwarded-for'])) return null;
   if (!authEnabled) return { id: 0, username: 'dev', role: 'administrador' };
   const origin = req.headers.origin;
   if (origin && new URL(origin).host !== req.headers.host) return null;

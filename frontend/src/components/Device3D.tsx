@@ -18,11 +18,11 @@ const STATUS_COLOR: Record<DeviceStatus, string> = {
   ok: '#34d399',
   atencao: '#fbbf24',
   critico: '#f87171',
-  desconhecido: '#38bdf8',
+  desconhecido: '#3fc6ee',
 };
 
 const BODY = '#15213a';
-const EDGE = '#22d3ee';
+const EDGE = '#12baea';
 
 type LedState = 'on' | 'off' | 'alarm' | 'warn';
 
@@ -78,7 +78,7 @@ function PortRow({ count, width, y, z, ports, device, offset = 0, rows = 1, tall
       <group key={i} position={[x, yy, z]}>
         <mesh>
           <boxGeometry args={[gap * 0.72, tall ? 0.1 : 0.07, 0.02]} />
-          <meshStandardMaterial color="#020617" metalness={0.4} roughness={0.6} />
+          <meshStandardMaterial color="#05021a" metalness={0.4} roughness={0.6} />
         </mesh>
         <Led position={[0, tall ? 0.07 : 0.055, 0.005]} state={led} size={[gap * 0.3, 0.018, 0.012]} />
       </group>,
@@ -118,7 +118,7 @@ function RackDevice({ device, units = 1, router = false }: { device: DeviceCard;
       {/* faixa de acento */}
       <mesh position={[-1.4, 0, 0.805]}>
         <boxGeometry args={[0.16, h * 0.7, 0.01]} />
-        <meshStandardMaterial color={router ? '#818cf8' : '#22d3ee'} emissive={router ? '#818cf8' : '#22d3ee'} emissiveIntensity={0.8} toneMapped={false} />
+        <meshStandardMaterial color={router ? '#6b5cff' : '#12baea'} emissive={router ? '#6b5cff' : '#12baea'} emissiveIntensity={0.8} toneMapped={false} />
       </mesh>
     </group>
   );
@@ -149,7 +149,7 @@ function OltDevice({ device }: { device: DeviceCard }) {
       {/* ventilação */}
       <mesh position={[0, -0.88, 0.81]}>
         <boxGeometry args={[2.7, 0.14, 0.02]} />
-        <meshStandardMaterial color="#020617" metalness={0.3} roughness={0.8} />
+        <meshStandardMaterial color="#05021a" metalness={0.3} roughness={0.8} />
       </mesh>
     </group>
   );
@@ -235,7 +235,7 @@ function Scanner({ height }: { height: number }) {
   return (
     <mesh ref={ref} rotation={[-Math.PI / 2, 0, 0]}>
       <planeGeometry args={[3.8, 2.4]} />
-      <meshBasicMaterial color="#22d3ee" transparent opacity={0.07} depthWrite={false} />
+      <meshBasicMaterial color="#12baea" transparent opacity={0.07} depthWrite={false} />
     </mesh>
   );
 }
@@ -290,11 +290,11 @@ export default function Device3D({ device }: { device: DeviceCard }) {
       gl={{ antialias: true, alpha: true }}
       style={{ background: 'transparent' }}
     >
-      <fog attach="fog" args={['#030712', 7, 14]} />
+      <fog attach="fog" args={['#05021a', 7, 14]} />
       <ambientLight intensity={0.7} />
-      <hemisphereLight args={['#7dd3fc', '#0b1324', 0.6]} />
-      <pointLight position={[4, 5, 4]} intensity={90} color="#7dd3fc" />
-      <pointLight position={[-5, 2, -3]} intensity={30} color="#a78bfa" />
+      <hemisphereLight args={['#8ddcf5', '#0b1324', 0.6]} />
+      <pointLight position={[4, 5, 4]} intensity={90} color="#8ddcf5" />
+      <pointLight position={[-5, 2, -3]} intensity={30} color="#c874f8" />
       <directionalLight position={[0, 6, 2]} intensity={0.6} />
       <Model device={device} />
       <StatusRing status={device.status} />

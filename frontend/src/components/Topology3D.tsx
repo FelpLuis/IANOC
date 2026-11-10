@@ -11,8 +11,8 @@ import { Edges, Html, Line, OrbitControls, Stars } from '@react-three/drei';
 import { QuadraticBezierCurve3, Vector3, type Group, type Mesh, type MeshStandardMaterial } from 'three';
 import type { DeviceStatus, TopoKind, TopoLink, TopoNode, TopologyGraph } from '../types';
 
-export const STATUS_HEX: Record<DeviceStatus, string> = { ok: '#34d399', atencao: '#fbbf24', critico: '#f87171', desconhecido: '#38bdf8' };
-const LINK_HEX = { ok: '#22d3ee', alerta: '#f87171', desconhecido: '#64748b' } as const;
+export const STATUS_HEX: Record<DeviceStatus, string> = { ok: '#34d399', atencao: '#fbbf24', critico: '#f87171', desconhecido: '#3fc6ee' };
+const LINK_HEX = { ok: '#12baea', alerta: '#f87171', desconhecido: '#64748b' } as const;
 const LAYER_GAP = 1.7;
 
 // ------------------------------------------------------------------ layout
@@ -73,21 +73,21 @@ function layout(nodes: TopoNode[], links: TopoLink[]): { pos: Map<string, Vector
 function Shape({ tipo }: { tipo: TopoKind }) {
   const metal = <meshStandardMaterial color="#16223b" metalness={0.65} roughness={0.32} />;
   switch (tipo) {
-    case 'roteador': return <mesh><boxGeometry args={[0.95, 0.26, 0.62]} />{metal}<Edges color="#818cf8" /></mesh>;
-    case 'switch': return <mesh><boxGeometry args={[0.95, 0.16, 0.5]} />{metal}<Edges color="#22d3ee" /></mesh>;
-    case 'olt': return <mesh><boxGeometry args={[0.5, 0.85, 0.5]} />{metal}<Edges color="#22d3ee" /></mesh>;
-    case 'servidor': return <mesh><boxGeometry args={[0.42, 0.62, 0.5]} />{metal}<Edges color="#a78bfa" /></mesh>;
+    case 'roteador': return <mesh><boxGeometry args={[0.95, 0.26, 0.62]} />{metal}<Edges color="#6b5cff" /></mesh>;
+    case 'switch': return <mesh><boxGeometry args={[0.95, 0.16, 0.5]} />{metal}<Edges color="#12baea" /></mesh>;
+    case 'olt': return <mesh><boxGeometry args={[0.5, 0.85, 0.5]} />{metal}<Edges color="#12baea" /></mesh>;
+    case 'servidor': return <mesh><boxGeometry args={[0.42, 0.62, 0.5]} />{metal}<Edges color="#c874f8" /></mesh>;
     case 'transporte': return <mesh><cylinderGeometry args={[0.32, 0.32, 0.3, 24]} />{metal}<Edges color="#fbbf24" threshold={30} /></mesh>;
-    case 'onu': return <mesh><boxGeometry args={[0.4, 0.12, 0.3]} /><meshStandardMaterial color="#e2e8f0" /><Edges color="#22d3ee" /></mesh>;
+    case 'onu': return <mesh><boxGeometry args={[0.4, 0.12, 0.3]} /><meshStandardMaterial color="#e2e8f0" /><Edges color="#12baea" /></mesh>;
     case 'nuvem': return (
       <group>
         {[[0, 0, 0, 0.55], [0.5, -0.1, 0.1, 0.42], [-0.5, -0.1, -0.1, 0.42], [0.15, 0.25, -0.3, 0.38]].map(([x, y, z, r], i) => (
-          <mesh key={i} position={[x, y, z]}><sphereGeometry args={[r, 24, 24]} /><meshStandardMaterial color="#38bdf8" transparent opacity={0.28} emissive="#0ea5e9" emissiveIntensity={0.5} /></mesh>
+          <mesh key={i} position={[x, y, z]}><sphereGeometry args={[r, 24, 24]} /><meshStandardMaterial color="#3fc6ee" transparent opacity={0.28} emissive="#0ea3d0" emissiveIntensity={0.5} /></mesh>
         ))}
       </group>
     );
-    case 'servico': return <mesh><icosahedronGeometry args={[0.38, 1]} /><meshStandardMaterial color="#a78bfa" wireframe emissive="#a78bfa" emissiveIntensity={0.6} /></mesh>;
-    case 'site': return <mesh><octahedronGeometry args={[0.3]} /><meshStandardMaterial color="#22d3ee" wireframe emissive="#22d3ee" emissiveIntensity={0.5} /></mesh>;
+    case 'servico': return <mesh><icosahedronGeometry args={[0.38, 1]} /><meshStandardMaterial color="#c874f8" wireframe emissive="#c874f8" emissiveIntensity={0.6} /></mesh>;
+    case 'site': return <mesh><octahedronGeometry args={[0.3]} /><meshStandardMaterial color="#12baea" wireframe emissive="#12baea" emissiveIntensity={0.5} /></mesh>;
     default: return <mesh><sphereGeometry args={[0.24, 20, 20]} />{metal}<Edges color="#64748b" threshold={40} /></mesh>;
   }
 }
@@ -202,7 +202,7 @@ function Link({ link, a, b, highlight, dim }: { link: TopoLink; a: Vector3; b: V
       {!dim && (
         <Packets
           curve={curve}
-          color={link.status === 'alerta' ? '#fca5a5' : link.inferido ? '#94a3b8' : '#67e8f9'}
+          color={link.status === 'alerta' ? '#fca5a5' : link.inferido ? '#94a3b8' : '#5fd2f3'}
           speed={link.inferido ? 0.12 : 0.18 + Math.min(0.5, (link.gbps ?? 1) / 120)}
           count={link.inferido ? 1 : 3}
         />
@@ -234,11 +234,11 @@ export default function Topology3D({ graph, selected, onSelect, showInferred, sh
 
   return (
     <Canvas dpr={[1, 2]} camera={{ position: [0, centroY + raio * 0.75, raio * 2.1], fov: 45 }} gl={{ antialias: true, alpha: true }} onPointerMissed={() => onSelect(null)}>
-      <fog attach="fog" args={['#030712', raio * 2, raio * 4.5]} />
+      <fog attach="fog" args={['#05021a', raio * 2, raio * 4.5]} />
       <ambientLight intensity={0.7} />
-      <hemisphereLight args={['#7dd3fc', '#0b1324', 0.6]} />
-      <pointLight position={[8, 12, 8]} intensity={160} color="#7dd3fc" />
-      <pointLight position={[-10, 4, -6]} intensity={80} color="#a78bfa" />
+      <hemisphereLight args={['#8ddcf5', '#0b1324', 0.6]} />
+      <pointLight position={[8, 12, 8]} intensity={160} color="#8ddcf5" />
+      <pointLight position={[-10, 4, -6]} intensity={80} color="#c874f8" />
       <Stars radius={60} depth={30} count={1800} factor={3} fade speed={0.6} />
       <gridHelper args={[60, 60, '#155e75', '#0c2a3a']} position={[0, minY, 0]} />
 

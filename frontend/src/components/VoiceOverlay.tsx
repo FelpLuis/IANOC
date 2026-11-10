@@ -75,7 +75,7 @@ export function VoiceOverlay(props: {
             'flex h-20 w-20 items-center justify-center rounded-full text-slate-950 transition-transform active:scale-95 disabled:opacity-50',
             state === 'listening' ? 'bg-gradient-to-br from-rose-300 to-fuchsia-500' : 'bg-gradient-to-br from-cyan-300 via-sky-400 to-indigo-500',
           )}
-          style={{ boxShadow: state === 'listening' ? '0 0 40px -6px rgba(244,114,182,0.9)' : '0 0 40px -8px rgba(34,211,238,0.9)' }}
+          style={{ boxShadow: state === 'listening' ? '0 0 40px -6px rgba(244,114,182,0.9)' : '0 0 40px -8px rgba(18,186,234,0.9)' }}
           title={state === 'speaking' ? 'Interromper e falar' : state === 'listening' ? 'Enviar agora' : 'Falar'}
         >
           {state === 'listening' ? <Square className="h-7 w-7" /> : <Mic className="h-8 w-8" />}

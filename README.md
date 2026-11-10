@@ -45,7 +45,15 @@ Opcionalmente, um modelo de linguagem (Claude, Groq, Gemini, OpenRouter ou Ollam
 responder perguntas livres; veja "Configurar". Mesmo com modelo, os relatórios usam os números
 do servidor e, se o modelo falhar, a análise nativa assume.
 
-**Somente leitura.** Nenhuma ferramenta altera estado: o Zabbix aceita só métodos `.get`,
+**Cadastros com confirmação (única escrita).** "Cadastre no zabbix o host X com IP Y no grupo Z, template W",
+cliente, POP, equipamento ou enlace no sistema NOC: a NIA confere os dados (grupo/template existem,
+equipamento existe, porta livre), mostra um cartão com todos os campos e só grava quando um
+**administrador** clica em Confirmar (uso único, 15 min). Liberado: Zabbix `host.create`; NOC
+`POST /api/clientes`, `POST /api/locais` e `PUT /api/topology` (relida na hora, só acrescentando).
+Nada de alteração ou exclusão. Auditoria em `<dados>/auditoria.log`. O usuário de serviço do NOC
+com essas permissões: `npm run noc:criar-usuario -- --escrita`.
+
+**Fora os cadastros, somente leitura.** Nenhuma outra ferramenta altera estado: o Zabbix aceita só métodos `.get`,
 o GenieACS e o Opa! Suite só GET, o IXC só `listar`, e o NOC é acessado por um usuário de serviço.
 Quando uma ação resolveria o problema (reboot, provisionamento), o assistente diz qual é
 e onde fazer, e um humano executa.
@@ -132,6 +140,43 @@ Leve o arquivo ao servidor e rode `sudo bash ianoc-instalar-<data>.sh` no consol
 As chaves entram em `/etc/ianoc/ianoc.env` sem apagar as demais (fica uma cópia
 `.bak-<data>`). O arquivo tem credenciais: apague-o depois. A pasta `release/`
 não vai para o git.
+
+### Publicar pelo GitHub (github.com/FelpLuis/IANOC)
+
+O servidor confere o `main` do GitHub a cada 5 minutos (`ianoc-github.timer`). Quando há
+commit novo ele compila (como o usuário `ianoc`, sem root), instala e, se a versão nova não
+responder, volta sozinho para a anterior. Para mandar a versão atual:
+
+```bash
+bash deploy/publicar-github.sh "o que mudou"
+```
+
+O script copia esta pasta para o repositório (só o que o git enxerga, nunca `.env`,
+`data/`, `release/`), faz o commit e o push. Para ver antes o que iria:
+`IANOC_SIMULAR=1 bash deploy/publicar-github.sh`. Enviar pelo site do GitHub
+(upload de arquivos) também vale: o servidor instala o que estiver no `main`.
+
+No servidor:
+
+- `sudo ianoc-atualizar`: confere e instala agora, sem esperar o timer; `--forcar` reinstala mesmo sem commit novo.
+- `journalctl -u ianoc-github -n 80`: log das atualizações.
+- Repositório e ramo ficam em `/etc/ianoc/github.conf` (`REPO=`, `BRANCH=`). Sem esse arquivo o timer não liga.
+- Repositório privado: gere no servidor uma chave (`sudo ssh-keygen -t ed25519 -f /root/.ssh/ianoc_github -N ""`),
+  cadastre a pública em *Settings → Deploy keys* do repositório (somente leitura) e use
+  no `github.conf` as linhas `REPO=git@github.com:FelpLuis/IANOC.git` e
+  `export GIT_SSH_COMMAND="ssh -i /root/.ssh/ianoc_github"`.
+- Credenciais nunca vão pelo GitHub: ficam só em `/etc/ianoc/ianoc.env`.
+
+### Acesso e identidade visual
+
+Com `IANOC_AUTH=local` só entra o usuário de `IANOC_ADMIN_USER` (ex.: `NOC`), com a senha
+de `IANOC_ADMIN_PASSWORD`; o login do sistema NOC e os outros usuários locais ficam
+desligados. `IANOC_ADMIN_TROCA_SENHA=nao` mantém a senha fixa (sem troca no primeiro acesso;
+mudou no `.env`, vale na próxima partida). As três ficam só em `/etc/ianoc/ianoc.env`.
+
+A tela de entrada, a interface e os documentos seguem a identidade da UpDown Internet: logo
+oficial (`frontend/public/brand/`), azul `#1A00A8`, ciano `#12BAEA` e roxo `#A40AE8`.
+Logo e cores enviados em "Base e identidade" substituem os padrões nos documentos.
 
 ## 📁 Estrutura do Projeto
 

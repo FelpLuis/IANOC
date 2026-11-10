@@ -3,16 +3,17 @@
 @tailwind utilities;
 
 /*
- * Tema HUD do IA NOC: fundo escuro com grade em movimento, painéis de vidro,
- * acentos ciano/violeta. O app é sempre escuro (class="dark" no <html>).
+ * Tema HUD da NIA na identidade visual da UpDown Internet: fundo azul-noite com o azul
+ * da marca (#1A00A8), acentos no ciano (#12BAEA) e no roxo (#A40AE8) da logo.
+ * O app é sempre escuro (class="dark" no <html>).
  */
 
 @layer base {
   :root {
-    --hud-bg: #030712;
+    --hud-bg: #05021a;
     --hud-cyan: 34 211 238;
     --hud-violet: 167 139 250;
-    --hud-line: rgba(56, 189, 248, 0.12);
+    --hud-line: rgba(18, 186, 234, 0.12);
     color-scheme: dark;
   }
 
@@ -27,14 +28,14 @@
   body {
     @apply text-slate-100 antialiased;
     background:
-      radial-gradient(1200px 600px at 85% -10%, rgba(14, 165, 233, 0.16), transparent 60%),
-      radial-gradient(900px 500px at -10% 110%, rgba(139, 92, 246, 0.14), transparent 60%),
+      radial-gradient(1200px 600px at 85% -10%, rgba(26, 0, 168, 0.55), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, rgba(164, 10, 232, 0.16), transparent 60%),
       var(--hud-bg);
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 
   ::selection {
-    background: rgba(34, 211, 238, 0.3);
+    background: rgba(18, 186, 234, 0.3);
   }
 }
 
@@ -61,12 +62,12 @@
     left: 0;
     right: 0;
     height: 160px;
-    background: linear-gradient(180deg, transparent, rgba(34, 211, 238, 0.05), transparent);
+    background: linear-gradient(180deg, transparent, rgba(18, 186, 234, 0.05), transparent);
     animation: hud-scan 9s ease-in-out infinite;
   }
 
   .glass {
-    background: linear-gradient(180deg, rgba(15, 23, 42, 0.72), rgba(8, 13, 28, 0.66));
+    background: linear-gradient(180deg, rgba(22, 15, 70, 0.72), rgba(10, 6, 40, 0.68));
     @apply border border-sky-400/10 backdrop-blur-xl;
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.02) inset, 0 20px 40px -24px rgba(0, 0, 0, 0.8);
   }
@@ -75,7 +76,7 @@
     @apply transition-all duration-300 hover:border-cyan-400/30;
   }
   .glass-hover:hover {
-    box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.08) inset, 0 0 26px -10px rgba(34, 211, 238, 0.45);
+    box-shadow: 0 0 0 1px rgba(18, 186, 234, 0.08) inset, 0 0 26px -10px rgba(18, 186, 234, 0.45);
   }
 
   /* Cantos de mira nos painéis principais */
@@ -88,7 +89,7 @@
     position: absolute;
     width: 14px;
     height: 14px;
-    border-color: rgba(34, 211, 238, 0.55);
+    border-color: rgba(18, 186, 234, 0.55);
     pointer-events: none;
   }
   .hud-corners::before {
@@ -107,7 +108,7 @@
   }
 
   .neon-text {
-    background: linear-gradient(90deg, #67e8f9, #38bdf8 40%, #a78bfa);
+    background: linear-gradient(90deg, #5fd2f3, #3fc6ee 40%, #c874f8);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
@@ -122,12 +123,12 @@
   }
 
   .btn-primary {
-    @apply btn text-slate-950;
-    background: linear-gradient(135deg, #22d3ee, #38bdf8 50%, #818cf8);
-    box-shadow: 0 0 22px -8px rgba(34, 211, 238, 0.8);
+    @apply btn text-white;
+    background: linear-gradient(135deg, #12baea, #2a12f0 55%, #a40ae8);
+    box-shadow: 0 0 22px -8px rgba(18, 186, 234, 0.8);
   }
   .btn-primary:hover {
-    box-shadow: 0 0 30px -6px rgba(34, 211, 238, 0.95);
+    box-shadow: 0 0 30px -6px rgba(18, 186, 234, 0.95);
     filter: brightness(1.08);
   }
 
@@ -148,7 +149,7 @@
   }
   .icon-btn-active {
     @apply icon-btn bg-cyan-400/15 text-cyan-200;
-    box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.35) inset, 0 0 16px -6px rgba(34, 211, 238, 0.7);
+    box-shadow: 0 0 0 1px rgba(18, 186, 234, 0.35) inset, 0 0 16px -6px rgba(18, 186, 234, 0.7);
   }
 
   .input {
@@ -176,9 +177,9 @@
   }
 
   .message-user {
-    @apply message-bubble rounded-br-md text-slate-950;
-    background: linear-gradient(135deg, #67e8f9, #38bdf8 60%, #818cf8);
-    box-shadow: 0 10px 30px -14px rgba(56, 189, 248, 0.8);
+    @apply message-bubble rounded-br-md text-white;
+    background: linear-gradient(135deg, #2a12f0, #1a00a8 60%, #7a08b8);
+    box-shadow: 0 10px 30px -14px rgba(42, 18, 240, 0.9);
   }
 
   .message-assistant {
@@ -203,17 +204,17 @@
 @layer utilities {
   .scrollbar-thin {
     scrollbar-width: thin;
-    scrollbar-color: rgba(56, 189, 248, 0.25) transparent;
+    scrollbar-color: rgba(18, 186, 234, 0.25) transparent;
   }
   .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
   .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
-  .scrollbar-thin::-webkit-scrollbar-thumb { background-color: rgba(56, 189, 248, 0.25); border-radius: 3px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background-color: rgba(18, 186, 234, 0.25); border-radius: 3px; }
 
   .animate-fade-in { animation: fadeIn 0.3s ease-out; }
   .animate-slide-up { animation: slideUp 0.35s cubic-bezier(0.2, 0.7, 0.2, 1); }
   .animate-bounce { animation: bounce 1s infinite; }
 
-  .text-glow { text-shadow: 0 0 12px rgba(34, 211, 238, 0.55); }
+  .text-glow { text-shadow: 0 0 12px rgba(18, 186, 234, 0.55); }
 }
 
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }

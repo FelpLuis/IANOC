@@ -13,6 +13,12 @@
  *   4. grava NOC_API_USER e NOC_API_PASSWORD no .env.
  *
  * Rodar de novo com o usuário já existente só reaplica as permissões do perfil.
+ *
+ *   npm run noc:criar-usuario -- --escrita
+ *
+ * Com --escrita o perfil é `ianoc_cadastro`: as leituras acima mais só as permissões
+ * de cadastro que a NIA usa (cliente, local/POP, equipamento e enlace na topologia).
+ * Nenhuma permissão de exclusão. Toda gravação ainda passa pela confirmação na tela.
  */
 
 import 'dotenv/config';
@@ -22,9 +28,12 @@ import readline from 'node:readline';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-const ROLE = 'ianoc_leitura';
+const ESCRITA = process.argv.includes('--escrita');
+const ROLE = ESCRITA ? 'ianoc_cadastro' : 'ianoc_leitura';
 const USERNAME = process.env.NOC_SERVICE_USERNAME || 'ianoc-servico';
-const PERMISSIONS = ['topology.view', 'zabbix.view', 'clientes.view', 'radius.view'];
+const LEITURA = ['topology.view', 'zabbix.view', 'clientes.view', 'radius.view'];
+const CADASTRO = ['locais.view', 'clientes.create', 'locais.create', 'topology.edit', 'topology.equipment.create', 'topology.link.create'];
+const PERMISSIONS = ESCRITA ? [...LEITURA, ...CADASTRO] : LEITURA;
 const envPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../.env');
 const baseUrl = String(process.env.NOC_API_URL || '').trim().replace(/\/+$/, '');
 
@@ -93,7 +102,7 @@ async function main() {
     if (!role) {
       const created = await api('POST', '/api/platform/roles', admin, {
         name: ROLE,
-        description: 'Usuário de serviço do assistente IA NOC: somente leitura.',
+        description: ESCRITA ? 'Usuário de serviço da NIA: leitura e cadastro (sem exclusão), sempre com confirmação na tela.' : 'Usuário de serviço do assistente IA NOC: somente leitura.',
       });
       if (created.status !== 201) fail(`não criou o perfil (${created.status} ${created.data?.error || ''}).`);
       role = created.data;

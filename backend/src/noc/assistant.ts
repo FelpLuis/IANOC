@@ -29,7 +29,9 @@ export type AssistantEvent =
   | { type: 'tool_start'; id: string; name: string; input: unknown }
   | { type: 'tool_end'; id: string; name: string; ok: boolean; ms: number; devices?: DeviceCard[]; topology?: unknown }
   // Pedido para o navegador do operador abrir uma página (só http/https, em nova guia).
-  | { type: 'open_url'; url: string; label: string };
+  | { type: 'open_url'; url: string; label: string }
+  // Proposta de cadastro aguardando confirmação de um administrador (noc/acoes.ts).
+  | { type: 'pending_action'; acao: unknown };
 
 export interface AssistantReply {
   text: string;

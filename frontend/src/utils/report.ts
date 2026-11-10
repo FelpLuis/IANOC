@@ -63,3 +63,31 @@ ${renderedHtml}
 </body></html>`);
   win.document.close();
 }
+
+/**
+ * Documento com a identidade visual (logo, cores, rodapé) e o molde padrão, gerado no
+ * servidor. A janela abre no clique (para o navegador não bloquear) e recebe o HTML depois.
+ */
+export async function abrirDocumento(markdown: string) {
+  const win = window.open('', '_blank');
+  if (!win) {
+    alert('O navegador bloqueou a janela do documento. Libere pop-ups para este site.');
+    return;
+  }
+  win.document.write('<p style="font:14px system-ui;padding:24px;color:#334155">Gerando o documento com a identidade visual…</p>');
+  try {
+    const r = await fetch('/api/documento', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ markdown }),
+    });
+    const html = await r.text();
+    if (!r.ok) throw new Error(html.slice(0, 200));
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+  } catch (e) {
+    win.document.body.innerHTML = `<p style="font:14px system-ui;padding:24px;color:#b91c1c">Não foi possível gerar o documento: ${String(e instanceof Error ? e.message : e).replace(/[<>&]/g, '')}</p>`;
+  }
+}

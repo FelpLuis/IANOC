@@ -48,6 +48,20 @@ export async function zabbixCall<T = unknown>(method: string, params: Record<str
   if (!/\.get$/.test(method) && method !== 'apiinfo.version') {
     throw new ConnectorError('zabbix', `método ${method} bloqueado: o assistente só lê do Zabbix.`);
   }
+  return chamar<T>(method, params, instancia);
+}
+
+/**
+ * Escrita no Zabbix: só cadastro de host, e só chamada por acoes.ts depois que um
+ * administrador confirma na tela. Nenhum método de alteração ou remoção é liberado.
+ */
+const ESCRITA_PERMITIDA = new Set(['host.create']);
+export async function zabbixWrite<T = unknown>(method: string, params: Record<string, unknown>, instancia?: string): Promise<T> {
+  if (!ESCRITA_PERMITIDA.has(method)) throw new ConnectorError('zabbix', `método ${method} não é permitido para a NIA (só host.create).`);
+  return chamar<T>(method, params, instancia);
+}
+
+async function chamar<T>(method: string, params: Record<string, unknown>, instancia?: string): Promise<T> {
   const inst = pickInstance(instancia);
   // apiinfo.version recusa autenticação.
   if (method === 'apiinfo.version') return rpc<T>(inst, method, []);

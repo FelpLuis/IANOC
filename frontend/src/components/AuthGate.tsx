@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { KeyRound, Loader2 } from 'lucide-react';
+import { KeyRound, Loader2, LockKeyhole, UserRound } from 'lucide-react';
 import { AiCore } from './AiCore';
 
 export interface AuthUser {
@@ -75,6 +75,42 @@ function Field({ label, ...props }: { label: string } & React.InputHTMLAttribute
   );
 }
 
+/** Tela de entrada na identidade da UpDown: logo, boas-vindas e o acesso do NOC. */
+function WelcomeShell({ children }: { children: ReactNode }) {
+  return (
+    <div className="relative flex min-h-[100dvh] flex-col items-center justify-center px-4 py-10">
+      <div className="hud-bg" />
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(900px_520px_at_50%_-10%,rgba(26,0,168,0.75),transparent_70%)]" />
+      <div className="w-full max-w-sm animate-reveal">
+        <img src="/brand/updown-internet-branco.png" alt="UpDown Internet" className="mx-auto mb-8 h-auto w-56 drop-shadow-[0_8px_30px_rgba(18,186,234,0.25)] sm:w-64" />
+        <div className="glass hud-corners space-y-5 rounded-2xl p-6">
+          <div className="flex items-center gap-3">
+            <AiCore size={44} state="idle" />
+            <div>
+              <h1 className="text-2xl font-bold text-white">Bem-vindo</h1>
+              <p className="text-sm text-slate-300">à <span className="font-semibold text-cyan-300">NIA</span>, a assistente virtual do NOC</p>
+            </div>
+          </div>
+          {children}
+        </div>
+        <p className="mt-6 text-center text-xs text-slate-400">UpDown Internet · Centro de Operações de Rede</p>
+      </div>
+    </div>
+  );
+}
+
+function IconField({ label, icon, ...props }: { label: string; icon: ReactNode } & React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <label className="block">
+      <span className="hud-label">{label}</span>
+      <span className="relative mt-1 block">
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">{icon}</span>
+        <input {...props} className="input pl-10" />
+      </span>
+    </label>
+  );
+}
+
 function LoginForm({ onLogin }: { onLogin: (user: AuthUser, mustChange: boolean) => void }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -104,17 +140,17 @@ function LoginForm({ onLogin }: { onLogin: (user: AuthUser, mustChange: boolean)
   };
 
   return (
-    <Shell title="NIA" subtitle="IA NOC · entre com seu usuário">
+    <WelcomeShell>
       <form onSubmit={submit} className="space-y-4">
-        <Field label="Usuário" autoFocus autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} />
-        <Field label="Senha" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
-        {error && <p className="text-sm text-red-300">{error}</p>}
-        <button type="submit" disabled={sending || !username || !password} className="btn-primary w-full">
+        <IconField label="Usuário" icon={<UserRound className="h-4 w-4" />} autoFocus autoComplete="username" autoCapitalize="none" spellCheck={false} value={username} onChange={(e) => setUsername(e.target.value)} />
+        <IconField label="Senha" icon={<LockKeyhole className="h-4 w-4" />} type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        {error && <p role="alert" className="rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</p>}
+        <button type="submit" disabled={sending || !username || !password} className="btn-primary w-full py-2.5">
           {sending && <Loader2 className="h-4 w-4 animate-spin" />}
           Entrar
         </button>
       </form>
-    </Shell>
+    </WelcomeShell>
   );
 }
 

@@ -65,3 +65,6 @@ venv/
 env/
 # Instaladores offline (contêm credenciais)
 release/
+
+# Cópia local do repositório do GitHub (deploy/publicar-github.sh)
+.publicar-github/

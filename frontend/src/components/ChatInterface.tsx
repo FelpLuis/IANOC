@@ -25,9 +25,10 @@ import {
 } from 'lucide-react';
 import { cn, formatRelativeTime } from '../utils/helpers';
 import { earcon, markdownToSpeech, resumoFalado, useVoice, type ListenEnd } from '../hooks/useVoice';
-import { downloadMarkdown, printReport } from '../utils/report';
+import { abrirDocumento, downloadMarkdown } from '../utils/report';
 import { VoiceStatus } from './VoiceStatus';
 import { VoiceOverlay } from './VoiceOverlay';
+import { ActionCard } from './ActionCard';
 import { ThinkingPanel } from './ThinkingPanel';
 import { AiCore, type CoreState } from './AiCore';
 import { KIND_ICON, STATUS_STYLE } from './DevicePanel';
@@ -101,6 +102,7 @@ const TOOL_LABELS: Record<string, string> = {
   topologia_conexoes: 'Topologia · conexões',
   ixc_logins_online: 'IXC · logins PPPoE online',
   web_pesquisa: 'Web · busca e leitura das fontes',
+  base_conhecimento: 'Base de conhecimento',
 };
 const toolLabel = (name: string) => TOOL_LABELS[name] ?? name;
 
@@ -443,6 +445,9 @@ export function ChatInterface({
                     {isUser ? <div className="whitespace-pre-wrap text-[0.94rem] font-medium">{message.content}</div> : renderMessageContent(message.content, isNewest)}
                   </div>
 
+                  {/* Cadastros propostos: só gravam depois de Confirmar */}
+                  {!isUser && message.pendentes?.map((a) => <ActionCard key={a.id} acao={a} />)}
+
                   {/* Páginas abertas no navegador */}
                   {!isUser && message.actions && message.actions.length > 0 && (
                     <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -540,9 +545,9 @@ export function ChatInterface({
                         </button>
                         <button
                           type="button"
-                          onClick={() => printReport(bubbleRefs.current.get(message.id)?.innerHTML ?? '', message.content)}
-                          className="icon-btn hidden p-1.5 sm:block"
-                          title="Imprimir / salvar em PDF"
+                          onClick={() => abrirDocumento(message.content)}
+                          className="icon-btn p-1.5"
+                          title="Gerar documento (PDF com a identidade visual e o molde)"
                         >
                           <Printer className="h-3.5 w-3.5" />
                         </button>
@@ -596,7 +601,7 @@ export function ChatInterface({
             </div>
           )}
 
-          <div className="glass flex items-end gap-1 rounded-2xl p-1.5 transition-all focus-within:border-cyan-400/40 focus-within:shadow-[0_0_30px_-12px_rgba(34,211,238,0.8)] sm:gap-1.5 sm:p-2">
+          <div className="glass flex items-end gap-1 rounded-2xl p-1.5 transition-all focus-within:border-cyan-400/40 focus-within:shadow-[0_0_30px_-12px_rgba(18,186,234,0.8)] sm:gap-1.5 sm:p-2">
             <button type="button" onClick={() => setShowReports(!showReports)} className={showReports ? 'icon-btn-active' : 'icon-btn'} title="Relatórios">
               <FileBarChart className="h-5 w-5" />
             </button>

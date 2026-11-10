@@ -16,7 +16,7 @@ import type { Equipamento } from '../knowledge.js';
 export type Intent =
   | 'saudacao' | 'ajuda' | 'agradecimento'
   | 'relatorio' | 'alarmes' | 'eventos'
-  | 'equipamento' | 'conectados' | 'caminho' | 'impacto' | 'topologia' | 'abrir' | 'pesquisa'
+  | 'equipamento' | 'conectados' | 'caminho' | 'impacto' | 'topologia' | 'abrir' | 'pesquisa' | 'base' | 'cadastrar'
   | 'onus' | 'opa_fila' | 'opa_resumo' | 'opa_protocolo'
   | 'os_ixc' | 'cliente' | 'ftth'
   | 'desconhecido';
@@ -55,6 +55,10 @@ const RULES: Array<{ intent: Intent; peso?: number; padroes: RegExp[] }> = [
   { intent: 'eventos', padroes: [/(quais|que) hosts? (mais )?(cai|caiu|cairam|ficou|ficaram)/, /mais (cai|caiu|cairam|quedas|instav)/, /incidentes? (da|na|desta|dessa|do|no|nos|dos) (semana|mes|ultimos|periodo|ontem)/, /historico de (alarm|evento|queda|incidente)/, /(ranking|top) (de )?(hosts?|alarm|queda|evento)/, /eventos? (de|do|da|no|na) (ontem|semana|mes|periodo)/, /quantas quedas/] },
   { intent: 'alarmes', padroes: [/alarm/, /alerta/, /\bproblemas?\b/, /\bincidentes?\b/, /fora do ar/, /\bcaid[oa]s?\b/, /\bcaiu\b/, /\bquedas?\b/, /\bdown\b/, /\boffline\b/, /zabbix/, /o que (esta|ta) (acontecendo|pegando|errado)/, /tem (algo|alguma coisa) (errado|caido|fora)/, /sem (internet|conexao|sinal)/, /\bdesastres?\b/] },
   // Abrir páginas no navegador do operador ("abre o Zabbix", "abre uma guia com o IXC", "pesquisa X no Google").
+  // Cadastro (escrita com confirmação): host no Zabbix; cliente, POP, equipamento, enlace no NOC.
+  { intent: 'cadastrar', peso: 6, padroes: [/\b(cadastre|cadastrar|cadastra|adicione|adicionar|registre|registrar|inclua|incluir|insira|inserir|crie|criar)\b.{0,40}\b(host|cliente|assinante|pop|data ?center|equipamento|aparelho|olt|switch|roteador|servidor|enlace|link|conexao)\b/, /\b(ligue|conecte)\b.{0,40}\bporta\b.{0,60}\bporta\b/] },
+  // Base de conhecimento: arquivos que o operador enviou (noc/kb.ts).
+  { intent: 'base', peso: 4.5, padroes: [/\bbase (de conhecimento|interna)\b/, /\b(nos?|nas?) (meus|minhas|nossos|nossas)? ?(documentos|arquivos|pdfs?|manuais) (enviad|que (eu )?(mandei|enviei|subi))/, /\bo que (diz|fala) o (documento|manual|pdf|arquivo|procedimento)\b/, /\bsegundo o (manual|documento|procedimento|pdf)\b/, /\b(procure|busque|pesquise|consulte) (nos|nas|na) (documentos|arquivos|base|pdfs)\b/, /\bnos documentos\b/] },
   // Pesquisa na web e geração de manual/passo a passo (native/../web/manual.ts).
   { intent: 'pesquisa', peso: 3.5, padroes: [/\bmanual\b/, /\bpasso a passo\b/, /\btutorial\b/, /\bprocedimento (para|de)\b/, /\bpesquis[ae]r?\b.{0,40}\b(na|pela) (web|internet)\b/, /\b(busque|procure|pesquise|pesquisa)\b.{0,40}\b(na web|na internet)\b/, /^como (configurar|fazer|instalar|resetar|trocar|criar|liberar|habilitar|desbloquear|atualizar|provisionar|conectar|cadastrar|montar|fusionar|ajustar)\b/, /\bger[ae]r?\b.{0,25}\b(guia|manual|tutorial|conteudo|artigo|documentacao)\b/, /\b(o que e|o que significa|explique)\b/] },
   // "abro" e "coloco" aparecem quando a transcrição de voz erra a pessoa do verbo.

@@ -4,7 +4,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Activity, FileBarChart, LogOut, ShieldAlert, Headset, CalendarDays, User, X, Network } from 'lucide-react';
+import { Activity, FileBarChart, LogOut, ShieldAlert, Headset, CalendarDays, User, X, Network, BookOpen } from 'lucide-react';
 import { AiCore } from './AiCore';
 import { KIND_ICON, STATUS_STYLE } from './DevicePanel';
 import type { DeviceCard } from '../types';
@@ -33,13 +33,14 @@ export const QUICK_ACTIONS: Array<{ label: string; prompt: string; icon: typeof 
   { label: 'Fila do atendimento', prompt: 'Como está a fila de atendimentos no Opa agora? Quantos aguardando e há quanto tempo?', icon: Headset },
 ];
 
-export function HudSidebar({ user, onLogout, onAction, devices, onOpenDevice, onClose, busy }: {
+export function HudSidebar({ user, onLogout, onAction, devices, onOpenDevice, onClose, onOpenBase, busy }: {
   user: { username: string; display_name?: string; role: string };
   onLogout: () => void;
   onAction: (prompt: string) => void;
   devices: DeviceCard[];
   onOpenDevice: (index: number) => void;
   onClose?: () => void;
+  onOpenBase?: () => void;
   busy: boolean;
 }) {
   const [status, setStatus] = useState<NocStatus | null>(null);
@@ -58,7 +59,7 @@ export function HudSidebar({ user, onLogout, onAction, devices, onOpenDevice, on
         <AiCore size={42} state={busy ? 'thinking' : 'idle'} />
         <div className="min-w-0 flex-1">
           <div className="font-display text-lg font-bold tracking-[0.2em] neon-text" style={{ fontFamily: 'Orbitron, Inter, sans-serif' }}>NIA</div>
-          <div className="hud-label">IA NOC · UpDown</div>
+          <img src="/brand/updown-internet-branco.png" alt="UpDown Internet" className="mt-1 h-5 w-auto" />
         </div>
         {onClose && (
           <button type="button" onClick={onClose} className="icon-btn lg:hidden" title="Fechar">
@@ -108,6 +109,17 @@ export function HudSidebar({ user, onLogout, onAction, devices, onOpenDevice, on
 
         {/* ações */}
         <section>
+          {onOpenBase && (
+            <button
+              type="button"
+              onClick={onOpenBase}
+              className="mb-4 flex w-full items-center gap-2.5 rounded-lg border border-cyan-400/30 bg-cyan-400/10 px-3 py-2 text-left text-sm text-cyan-100 transition-all hover:bg-cyan-400/20"
+            >
+              <BookOpen className="h-4 w-4" />
+              <span className="flex-1">Base e identidade</span>
+              <span className="hud-label">PDF · logo</span>
+            </button>
+          )}
           <div className="hud-label mb-2 px-1">Ações rápidas</div>
           <div className="space-y-1">
             {QUICK_ACTIONS.map((a) => (

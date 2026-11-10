@@ -8,8 +8,8 @@ import { cn } from '../utils/helpers';
 export type CoreState = 'idle' | 'thinking' | 'listening' | 'speaking';
 
 const PALETTE: Record<CoreState, { core: string; ring: string; glow: string }> = {
-  idle: { core: 'from-cyan-300 via-sky-400 to-indigo-500', ring: 'border-cyan-300/50', glow: 'rgba(34,211,238,0.55)' },
-  thinking: { core: 'from-cyan-200 via-sky-400 to-violet-500', ring: 'border-sky-300/70', glow: 'rgba(56,189,248,0.8)' },
+  idle: { core: 'from-cyan-300 via-sky-400 to-indigo-500', ring: 'border-cyan-300/50', glow: 'rgba(18,186,234,0.55)' },
+  thinking: { core: 'from-cyan-200 via-sky-400 to-violet-500', ring: 'border-sky-300/70', glow: 'rgba(18,186,234,0.8)' },
   listening: { core: 'from-rose-300 via-pink-400 to-fuchsia-500', ring: 'border-rose-300/70', glow: 'rgba(244,114,182,0.75)' },
   speaking: { core: 'from-emerald-200 via-cyan-300 to-sky-500', ring: 'border-emerald-300/70', glow: 'rgba(52,211,153,0.75)' },
 };

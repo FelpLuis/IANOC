@@ -21,6 +21,8 @@ import { nocConfig } from '../config.js';
 import { ixcList } from '../connectors/ixc.js';
 import { buildManual } from '../web/manual.js';
 import { provedorBusca } from '../web/research.js';
+import { buscar as kbBuscar, temDocumentos } from '../kb.js';
+import { cadastro } from './cadastro.js';
 import { horaLocal } from '../http.js';
 import { dur } from './analysis.js';
 import { parse, norm, type Intent, type Parsed, type Periodo } from './nlu.js';
@@ -86,6 +88,13 @@ class Turn {
     this.emit({ type: 'tool_end', id, name, ok: !isError, ms: Date.now() - started, ...(devices.length ? { devices } : {}), ...(topology ? { topology } : {}) });
     this.toolsUsed.push(name);
     return { ok: !isError, data: (data ?? {}) as T, text };
+  }
+
+  conversa = '';
+
+  /** Cartão de cadastro para o operador conferir e confirmar. */
+  proposta(acao: unknown) {
+    this.emit({ type: 'pending_action', acao });
   }
 
   /** Pede ao navegador do operador para abrir uma página em nova guia. */
@@ -457,6 +466,34 @@ function temaDe(original: string): string {
     .trim();
 }
 
+/** Trechos da base interna (arquivos enviados) para o assunto, em Markdown. */
+function secaoBaseInterna(tema: string, limite = 4): { md: string; n: number; docs: string[] } {
+  const hits = kbBuscar(tema, limite).filter((h) => h.score >= 1.2);
+  if (!hits.length) return { md: '', n: 0, docs: [] };
+  const docs = [...new Set(hits.map((h) => h.nome))];
+  return {
+    md: ['### Da base interna', hits.map((h) => `- ${cut(h.trecho, 320)} _(${h.nome})_`).join('\n')].join('\n\n'),
+    n: hits.length,
+    docs,
+  };
+}
+
+/** "O que diz o manual sobre…", "procure nos documentos…": responde só com a base interna. */
+async function base(t: Turn, q: Parsed): Promise<string> {
+  const tema0 = temaDe(q.original
+    .replace(/\b(na|da|pela) base (de conhecimento|interna)\b/gi, ' ')
+    .replace(/\b(procure|busque|pesquise|consulte|veja)\s+(nos|nas|na)\s+(documentos|arquivos|base|pdfs)\b/gi, ' ')
+    .replace(/\bo que (diz|fala) o (documento|manual|pdf|arquivo|procedimento)( sobre)?\b/gi, ' ')
+    .replace(/\bsegundo o (manual|documento|procedimento|pdf)\b/gi, ' ')
+    .replace(/\b(nos|nas) (meus|minhas|nossos|nossas)? ?(documentos|arquivos|pdfs|manuais)( enviados| que (eu )?(mandei|enviei|subi))?\b/gi, ' '));
+  const tema = tema0.replace(/^(sobre|a respeito de|de)\s+/i, '').trim();
+  if (!temDocumentos()) return 'A base de conhecimento ainda está vazia, Chefe. Envie PDFs, manuais ou procedimentos em "Base e identidade" no menu, e eu passo a usar nas respostas.';
+  if (tema.length < 3) return 'Sobre o quê, Chefe? Exemplo: "o que diz o manual sobre troca de ONU?".';
+  const r = await t.track('base_conhecimento', { tema }, async () => secaoBaseInterna(tema, 6));
+  if (!r.n) return `Não encontrei "${tema}" nos documentos enviados. Quer que eu pesquise na web? É só pedir "pesquise na web sobre ${tema}".`;
+  return [`Encontrei ${plural(r.n, 'trecho', 'trechos')} sobre ${tema} em ${plural(r.docs.length, 'documento', 'documentos')} da base interna.`, r.md].join('\n\n');
+}
+
 /** "Gere um manual de…", "como configurar…", "pesquise na web sobre…": busca, lê e monta o conteúdo. */
 async function pesquisa(t: Turn, q: Parsed): Promise<string> {
   const modo = /\b(manual|passo a passo|tutorial|procedimento)\b|^como /.test(q.texto) ? 'manual' : 'pesquisa';
@@ -475,7 +512,16 @@ async function pesquisa(t: Turn, q: Parsed): Promise<string> {
   const aviso = !links.length && !buscaLigada
     ? '\n\n> Busca na web desligada: sem uma API de busca configurada eu só consulto a Wikipédia. Para manuais, me passe o link da página (ex.: o manual do fabricante) ou configure `TAVILY_API_KEY` no servidor.'
     : '';
-  return `${m.fala}\n\n${m.markdown}${aviso}`;
+  // A base interna (documentos enviados pela equipe) vem antes do que veio da web.
+  const interna = secaoBaseInterna(tema);
+  if (!interna.n) return `${m.fala}\n\n${m.markdown}${aviso}`;
+  const [titulo, ...resto] = m.markdown.split('\n\n');
+  return [
+    `${m.fala} Também achei ${plural(interna.n, 'trecho', 'trechos')} nos documentos da equipe (${interna.docs.join(', ')}).`,
+    titulo,
+    interna.md,
+    ...resto,
+  ].join('\n\n') + aviso;
 }
 
 interface TopoResumo {
@@ -688,6 +734,8 @@ const AJUDA = [
   '- **Histórico** — "quais hosts mais caíram na semana?", "incidentes de ontem"',
   '- **Relatórios** — "relatório de hoje", "relatório da semana", "relatório do mês"',
   '- **Topologia 3D** — "gere a topologia 3D da rede backbone", "mapa da rede"',
+  '- **Base de conhecimento** — "o que diz o manual sobre troca de ONU?", "procure nos documentos sobre VLAN" (envie PDFs em Base e identidade)',
+  '- **Cadastros (com confirmação)** — "cadastre no zabbix o host X com IP 10.0.0.5 no grupo OLTs UpDown", cliente, POP, equipamento ou enlace no sistema NOC',
   '- **Manuais e pesquisa na web** — "gere um manual de como configurar a ONU HG8245H", "pesquise na web sobre GPON"',
   '- **Navegador** — "abre o Zabbix", "abre o IXC e o Opa", "abre o mapa da CTO 366", "pesquisa fibra óptica no Google"',
   '- **Conexões** — "quais aparelhos estão conectados no N8000?", "o que está ligado no 6730?"',
@@ -713,7 +761,9 @@ export async function askNative(sessionId: string, message: string, onEvent: Emi
   const curta = q.texto.split(' ').length <= 6 && /^(e|e o|e a|e no|e na|e do|e da|agora|e agora|mesma coisa|e para|e pro)\b/.test(q.texto);
   // Só herda em continuação curta ("e ontem?"); pergunta solta e desconhecida não herda o assunto.
   const soEntidade = q.intent === 'desconhecido' && (q.equipamentos.length > 0 || q.periodo.explicito || q.severidade !== undefined) && q.texto.split(' ').length <= 6;
-  if (ctx.lastIntent && (curta || soEntidade) && !['saudacao', 'agradecimento', 'ajuda'].includes(q.intent)) {
+  // Cadastro, abrir página e pesquisa nunca são herdados: cada um só acontece quando pedido de novo.
+  const naoHerda = ['cadastrar', 'abrir', 'pesquisa', 'base'];
+  if (ctx.lastIntent && !naoHerda.includes(ctx.lastIntent) && (curta || soEntidade) && !['saudacao', 'agradecimento', 'ajuda'].includes(q.intent)) {
     const anterior = ctx.last!;
     q.intent = ctx.lastIntent;
     if (!q.equipamentos.length && !q.host && !/\b(geral|tudo|todos)\b/.test(q.texto)) { q.equipamentos = anterior.equipamentos; q.host = anterior.host; }
@@ -731,6 +781,7 @@ export async function askNative(sessionId: string, message: string, onEvent: Emi
   }
 
   const t = new Turn(onEvent);
+  t.conversa = sessionId;
   let text: string;
   try {
     text = await responder(t, q, k);
@@ -756,6 +807,8 @@ async function responder(t: Turn, q: Parsed, k: Knowledge): Promise<string> {
     case 'conectados': return conectados(t, q, k);
     case 'abrir': return abrir(t, q);
     case 'pesquisa': return pesquisa(t, q);
+    case 'cadastrar': return cadastro(q, t.conversa, (a) => t.proposta(a));
+    case 'base': return base(t, q);
     case 'caminho': return caminho(t, q, k);
     case 'impacto': return impacto(t, q, k);
     case 'topologia': return topologia(t);

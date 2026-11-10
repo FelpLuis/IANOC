@@ -1,0 +1,9 @@
+# Scripts e units do servidor (Linux) sempre com LF, mesmo editados no Windows.
+* text=auto
+*.sh text eol=lf
+*.service text eol=lf
+*.timer text eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
+*.onnx binary

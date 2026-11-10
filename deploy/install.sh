@@ -81,6 +81,16 @@ if command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
     [ -n "$ip" ] && ufw allow from "$ip" to any port "$PORT" proto tcp >/dev/null && echo "ufw: $ip → $PORT"
   done
 fi
+# Atualização pelo GitHub: o comando fica sempre instalado; o timer só roda quando
+# /etc/ianoc/github.conf existe (criado na configuração do modo GitHub, veja o README).
+if [ -f "$DEST/deploy/atualizar-github.sh" ]; then
+  install -m 755 "$DEST/deploy/atualizar-github.sh" /usr/local/sbin/ianoc-atualizar
+  install -m 644 "$DEST/deploy/ianoc-github.service" /etc/systemd/system/ianoc-github.service
+  install -m 644 "$DEST/deploy/ianoc-github.timer" /etc/systemd/system/ianoc-github.timer
+  systemctl daemon-reload
+  if [ -f "$ETC/github.conf" ]; then systemctl enable --now ianoc-github.timer >/dev/null 2>&1 || true; fi
+fi
+
 install -m 644 "$DEST/deploy/ianoc-firewall.service" /etc/systemd/system/ianoc-firewall.service
 systemctl daemon-reload
 systemctl enable ianoc-firewall >/dev/null 2>&1

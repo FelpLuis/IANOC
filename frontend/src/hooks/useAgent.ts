@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { ws } from '../services/websocket';
-import type { AgentMemory, ProjectInfo, FileInfo, ChatResponse, AgentAction, ScanResult, Message, ToolActivity, DeviceCard, TopologyGraph } from '../types';
+import type { AgentMemory, ProjectInfo, FileInfo, ChatResponse, AgentAction, ScanResult, Message, ToolActivity, DeviceCard, TopologyGraph, AcaoPendente } from '../types';
 
 export function useAgent() {
   const [memory, setMemory] = useState<AgentMemory | null>(null);
@@ -15,6 +15,7 @@ export function useAgent() {
   const turnDevices = useRef(new Map<string, DeviceCard>());
   const turnTopology = useRef<TopologyGraph | null>(null);
   const turnActions = useRef<Array<{ url: string; label: string; opened: boolean }>>([]);
+  const turnPendentes = useRef<AcaoPendente[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const initialized = useRef(false);
@@ -75,8 +76,10 @@ export function useAgent() {
           ...(turnDevices.current.size ? { devices: [...turnDevices.current.values()] } : {}),
           ...(turnTopology.current ? { topology: turnTopology.current } : {}),
           ...(turnActions.current.length ? { actions: turnActions.current } : {}),
+          ...(turnPendentes.current.length ? { pendentes: turnPendentes.current } : {}),
         };
         turnActions.current = [];
+        turnPendentes.current = [];
         turnDevices.current = new Map();
         turnTopology.current = null;
         setMessages(prev => [...prev, assistantMsg]);
@@ -105,6 +108,12 @@ export function useAgent() {
       const w = window.open(url.href, '_blank');
       if (w) w.opener = null;
       turnActions.current.push({ url: url.href, label: String(e.label ?? url.hostname), opened: Boolean(w) });
+    });
+
+    // Cadastro proposto: vira um cartão com Confirmar/Cancelar na resposta.
+    const unsubscribePending = ws.on('pending_action', (msg) => {
+      const e = msg.payload as { acao?: AcaoPendente };
+      if (e.acao?.id) turnPendentes.current.push(e.acao);
     });
 
     const unsubscribeProjects = ws.on('projects', (msg) => {
@@ -159,6 +168,7 @@ export function useAgent() {
       unsubscribeToolStart();
       unsubscribeToolEnd();
       unsubscribeOpen();
+      unsubscribePending();
       unsubscribeProjects();
       unsubscribeProject();
       unsubscribeFiles();

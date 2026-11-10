@@ -51,23 +51,41 @@ function confere(senha: string, hash: string): boolean {
 
 const igual = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
-/** Cria o administrador master do .env, se ainda não existir. */
+/**
+ * Senha fixa: com IANOC_ADMIN_TROCA_SENHA=nao a senha do .env vale sempre (sem troca no
+ * primeiro acesso) e, se mudar no .env, o hash é atualizado na próxima partida.
+ */
+export const senhaFixa = /^(0|n|nao|não|false|no|off)$/i.test((process.env.IANOC_ADMIN_TROCA_SENHA || '').trim());
+
+/** Cria o administrador master do .env, se ainda não existir (e sincroniza a senha fixa). */
 export function semearAdmin() {
   const username = (process.env.IANOC_ADMIN_USER || '').trim();
   const senha = process.env.IANOC_ADMIN_PASSWORD || '';
   if (!username || !senha) return;
   const users = ler();
-  if (users.some((u) => igual(u.username, username))) return;
+  const existente = users.find((u) => igual(u.username, username));
+  if (existente) {
+    if (senhaFixa && (existente.mustChange || !confere(senha, existente.hash) || existente.role !== 'administrador')) {
+      existente.hash = hashSenha(senha);
+      existente.mustChange = false;
+      existente.role = 'administrador';
+      existente.display_name = process.env.IANOC_ADMIN_NAME || existente.display_name;
+      existente.passwordChangedAt = new Date().toISOString();
+      gravar(users);
+      console.log(`[auth] senha fixa de "${username}" sincronizada com o .env.`);
+    }
+    return;
+  }
   users.push({
     username,
     display_name: process.env.IANOC_ADMIN_NAME || username,
     role: 'administrador',
     hash: hashSenha(senha),
-    mustChange: true,
+    mustChange: !senhaFixa,
     createdAt: new Date().toISOString(),
   });
   gravar(users);
-  console.log(`[auth] administrador master "${username}" criado; troca de senha obrigatória no primeiro acesso.`);
+  console.log(`[auth] administrador "${username}" criado${senhaFixa ? ' com senha fixa' : '; troca de senha obrigatória no primeiro acesso'}.`);
 }
 
 /** Usuário local com a senha conferida, ou null (não existe ou senha errada). */

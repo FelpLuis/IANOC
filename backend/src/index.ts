@@ -17,7 +17,11 @@ import { getKnowledge } from './noc/knowledge.js';
 import { nocConfig } from './noc/config.js';
 import { speakToMp3, ttsEnabled, ttsVoiceLabel } from './noc/tts.js';
 import { warmKokoro } from './noc/kokoro.js';
-import { authenticateUpgrade, authEnabled, ipAllowed, handleLogin, handleLogout, handleMe, handlePassword, requireAuth, type SessionUser } from './auth.js';
+import multer from 'multer';
+import { adicionarArquivo as kbAdicionar, caminhoArquivo as kbCaminho, listar as kbListar, obter as kbObter, remover as kbRemover, type KbTipo } from './noc/kb.js';
+import { gerarDocumento, lerIdentidade, salvarIdentidade } from './noc/documento.js';
+import { cancelar as cancelarAcao, confirmar as confirmarAcao } from './noc/acoes.js';
+import { authenticateUpgrade, authEnabled, clientIp, ipAllowed, handleLogin, handleLogout, handleMe, handlePassword, requireAuth, type SessionUser } from './auth.js';
 import type { IncomingMessage } from 'http';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -60,8 +64,8 @@ const PROJECT_WS_TYPES = new Set(['scan', 'scan_all', 'get_files', 'execute_acti
 app.set('trust proxy', process.env.TRUST_PROXY === 'true');
 // Antes de tudo (inclusive da tela de login): só os IPs liberados em IANOC_ALLOWED_IPS.
 app.use((req, res, next) => {
-  if (ipAllowed(req.socket.remoteAddress)) return next();
-  console.warn(`[acesso] bloqueado: ${req.socket.remoteAddress} ${req.method} ${req.path}`);
+  if (ipAllowed(req.socket.remoteAddress, req.headers['x-forwarded-for'])) return next();
+  console.warn(`[acesso] bloqueado: ${clientIp(req.socket.remoteAddress, req.headers['x-forwarded-for'])} ${req.method} ${req.path}`);
   res.status(403).type('text').send('Acesso não permitido a partir deste endereço.');
 });
 app.use(cors({
@@ -131,6 +135,89 @@ app.post('/api/voice/speak', express.json({ limit: '16kb' }), async (req, res) =
   } catch (error) {
     res.status(502).json({ error: `Voz falhou: ${error instanceof Error ? error.message : String(error)}` });
   }
+});
+
+// ============ Base de conhecimento, identidade visual e documentos ============
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 1 } });
+const TIPOS_KB = new Set(['documento', 'molde', 'logo', 'imagem']);
+const podeEditarBase = (role?: string) => ['administrador', 'analista'].includes(String(role || 'administrador'));
+
+app.get('/api/kb', (req, res) => {
+  res.json({ arquivos: kbListar(), identidade: lerIdentidade() });
+});
+
+app.post('/api/kb', upload.single('arquivo'), async (req, res) => {
+  if (!podeEditarBase(res.locals.user?.role)) return res.status(403).json({ error: 'Seu perfil não pode alterar a base de conhecimento.' });
+  const tipo = String(req.body?.tipo || 'documento');
+  if (!req.file) return res.status(400).json({ error: 'Envie um arquivo no campo "arquivo".' });
+  if (!TIPOS_KB.has(tipo)) return res.status(400).json({ error: 'Tipo inválido (documento, molde, logo ou imagem).' });
+  // Nome do arquivo vem em latin1 no multipart; corrige acentos.
+  const nome = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
+  try {
+    const doc = await kbAdicionar(req.file.buffer, nome, req.file.mimetype, tipo as KbTipo);
+    // Primeiro logo enviado vira o logo da identidade, com as cores dele.
+    const id = lerIdentidade();
+    if (tipo === 'logo' && (!id.logoId || req.body?.usar === '1')) {
+      const [primaria, secundaria, destaque] = doc.cores ?? [];
+      salvarIdentidade({ logoId: doc.id, cores: { primaria: primaria ?? id.cores.primaria, secundaria: secundaria ?? id.cores.secundaria, destaque: destaque ?? id.cores.destaque } });
+    }
+    if (tipo === 'molde' && !id.moldePadraoId && doc.secoes?.length) salvarIdentidade({ moldePadraoId: doc.id });
+    console.log(`[kb] ${res.locals.user?.username ?? 'dev'} enviou ${tipo}: ${doc.nome} (${doc.chunks.length} trechos${doc.secoes ? `, ${doc.secoes.length} seções` : ''})`);
+    const { chunks, ...resumo } = doc;
+    res.json({ ok: true, arquivo: { ...resumo, trechos: chunks.length } });
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+app.delete('/api/kb/:id', (req, res) => {
+  if (!podeEditarBase(res.locals.user?.role)) return res.status(403).json({ error: 'Seu perfil não pode alterar a base de conhecimento.' });
+  const id = lerIdentidade();
+  if (id.logoId === req.params.id) salvarIdentidade({ logoId: '' });
+  if (id.moldePadraoId === req.params.id) salvarIdentidade({ moldePadraoId: '' });
+  res.json({ ok: kbRemover(req.params.id) });
+});
+
+app.get('/api/kb/:id/arquivo', (req, res) => {
+  const d = kbObter(req.params.id);
+  if (!d || !existsSync(kbCaminho(d))) return res.status(404).json({ error: 'Arquivo não encontrado.' });
+  res.type(d.ext === 'svg' ? 'image/svg+xml' : d.mime || 'application/octet-stream');
+  res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(d.nome)}"`);
+  // SVG enviado não roda script: o navegador recebe com CSP sem scripts.
+  res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'");
+  res.sendFile(path.resolve(kbCaminho(d)));
+});
+
+app.put('/api/identidade', (req, res) => {
+  if (!podeEditarBase(res.locals.user?.role)) return res.status(403).json({ error: 'Seu perfil não pode alterar a identidade visual.' });
+  res.json(salvarIdentidade(req.body ?? {}));
+});
+
+// Documento com a identidade visual (e o molde, se houver), pronto para imprimir/salvar em PDF.
+app.post('/api/documento', (req, res) => {
+  const markdown = String(req.body?.markdown || '');
+  if (!markdown.trim()) return res.status(400).json({ error: 'Conteúdo vazio.' });
+  const u = res.locals.user as SessionUser | undefined;
+  const html = gerarDocumento({ markdown, moldeId: req.body?.moldeId || undefined, autor: u ? `Solicitado por ${u.display_name || u.username}` : undefined });
+  res.type('html').setHeader('Content-Security-Policy', "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'");
+  res.send(html);
+});
+
+// ============ Cadastros propostos pela NIA (só administrador confirma) ============
+
+app.post('/api/acoes/:id/confirmar', async (req, res) => {
+  const u = res.locals.user as SessionUser | undefined;
+  // Sem login (desenvolvimento) vale como administrador local.
+  if (authEnabled && u?.role !== 'administrador') return res.status(403).json({ ok: false, mensagem: 'Só administradores podem confirmar cadastros.' });
+  const r = await confirmarAcao(req.params.id, u?.username ?? 'dev', clientIp(req.socket.remoteAddress, req.headers['x-forwarded-for']));
+  console.log(`[cadastro] ${u?.username ?? 'dev'} confirmou ${req.params.id}: ${r.mensagem}`);
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+app.post('/api/acoes/:id/cancelar', (req, res) => {
+  const u = res.locals.user as SessionUser | undefined;
+  res.json({ ok: cancelarAcao(req.params.id, u?.username ?? 'dev') });
 });
 
 app.get('/api/health', (req, res) => {

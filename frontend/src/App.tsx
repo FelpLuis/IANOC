@@ -4,6 +4,7 @@ import { ChatInterface } from './components/ChatInterface';
 import { HudSidebar } from './components/HudSidebar';
 import { DevicePanel } from './components/DevicePanel';
 import { TopologyView } from './components/TopologyView';
+import { KnowledgePanel } from './components/KnowledgePanel';
 import { AiCore } from './components/AiCore';
 import { useAgent } from './hooks/useAgent';
 import type { AuthUser } from './components/AuthGate';
@@ -46,6 +47,7 @@ export default function App({ user, onLogout }: { user: AuthUser; onLogout: () =
   const lastAutoOpened = useRef<string | null>(null);
   // Topologia 3D em tela cheia (resposta que trouxe a topologia, ou reaberta pelo botão).
   const [topology, setTopology] = useState<TopologyGraph | null>(null);
+  const [baseAberta, setBaseAberta] = useState(false);
   const lastTopologyOpened = useRef<string | null>(null);
 
   const { messages, isLoading, isChatting, toolActivity, isConnected, error, sendMessage, clearError } = useAgent();
@@ -119,6 +121,7 @@ export default function App({ user, onLogout }: { user: AuthUser; onLogout: () =
           devices={seenDevices}
           onOpenDevice={(i) => { setView({ devices: seenDevices, index: i }); setSidebarOpen(false); }}
           onClose={() => setSidebarOpen(false)}
+          onOpenBase={() => { setBaseAberta(true); setSidebarOpen(false); }}
           busy={busy}
         />
       </aside>
@@ -189,6 +192,7 @@ export default function App({ user, onLogout }: { user: AuthUser; onLogout: () =
       </main>
 
       {topology && <TopologyView graph={topology} onClose={() => setTopology(null)} />}
+      {baseAberta && <KnowledgePanel onClose={() => setBaseAberta(false)} />}
 
       {error && (
         <div className="fixed bottom-24 right-4 z-50 animate-slide-up">
