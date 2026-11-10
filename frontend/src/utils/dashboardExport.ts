@@ -53,7 +53,8 @@ export async function htmlDoDashboard(d: Dashboard): Promise<string> {
 </body></html>`;
 }
 
-const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '').replace(/^(\d{8})/, '$1_');
+// Só os dígitos de "2026-11-10T14:35" → "20261110_1435" (sem colchetes: o Tailwind leria como classe).
+const stamp = () => new Date().toISOString().slice(0, 16).replace(/\D/g, '').replace(/^(\d{8})/, '$1_');
 
 /** Abre o dashboard exportado numa nova janela (e, se pedido, já chama a impressão). */
 export async function abrirDashboardExportado(d: Dashboard, imprimir = false) {

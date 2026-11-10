@@ -352,3 +352,26 @@
 @media (prefers-reduced-motion: reduce) {
   .dash-draw, .dash-grow, .dash-rise, .dash-fade, .dash-scan::after, .dash-pulse { animation: none; stroke-dashoffset: 0; }
 }
+
+/* ------------------------------------------------------------------ NIA TV (components/NiaTv) */
+.tv-root { background: transparent; }
+.tv-pergunta {
+  background: linear-gradient(100deg, rgba(26, 0, 168, 0.55), rgba(42, 18, 240, 0.2) 50%, rgba(164, 10, 232, 0.35));
+  border: 1px solid rgba(18, 186, 234, 0.25);
+  box-shadow: 0 0 50px -22px rgba(18, 186, 234, 0.8);
+}
+/* Texto em tamanho de TV: legível a alguns metros */
+.tv-prose { font-size: clamp(1.15rem, 0.6rem + 1vw, 1.75rem); line-height: 1.55; color: #e2e8f0; }
+.tv-prose > * + * { margin-top: 0.8em; }
+.tv-prose h1, .tv-prose h2, .tv-prose h3 { font-family: Orbitron, Inter, sans-serif; color: #fff; letter-spacing: 0.04em; margin-top: 1.2em; }
+.tv-prose h1 { font-size: 1.5em; } .tv-prose h2 { font-size: 1.25em; } .tv-prose h3 { font-size: 1.05em; color: #9be3f8; text-transform: uppercase; }
+.tv-prose strong { color: #fff; }
+.tv-prose ul { list-style: disc; padding-left: 1.3em; } .tv-prose ol { list-style: decimal; padding-left: 1.3em; }
+.tv-prose li::marker { color: #12baea; }
+.tv-prose a { color: #5fd2f3; text-decoration: underline; text-underline-offset: 3px; }
+.tv-prose blockquote { border-left: 4px solid #a40ae8; padding: 0.4em 1em; background: rgba(164, 10, 232, 0.08); border-radius: 0 0.75rem 0.75rem 0; color: #e4bffc; }
+.tv-prose code { font-family: "JetBrains Mono", monospace; font-size: 0.85em; background: rgba(18, 186, 234, 0.12); padding: 0.1em 0.4em; border-radius: 0.35em; }
+.tv-prose table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.72em; border: 1px solid rgba(91, 140, 255, 0.2); border-radius: 0.75rem; overflow: hidden; }
+.tv-prose th { text-align: left; padding: 0.6em 0.9em; font-family: "JetBrains Mono", monospace; text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.85em; color: #9be3f8; background: linear-gradient(90deg, rgba(18, 186, 234, 0.16), rgba(164, 10, 232, 0.12)); }
+.tv-prose td { padding: 0.55em 0.9em; border-top: 1px solid rgba(91, 140, 255, 0.1); }
+.tv-prose tbody tr:nth-child(even) td { background: rgba(18, 186, 234, 0.04); }

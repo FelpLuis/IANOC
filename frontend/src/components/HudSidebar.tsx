@@ -4,7 +4,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Activity, FileBarChart, LogOut, ShieldAlert, Headset, CalendarDays, User, X, Network, BookOpen } from 'lucide-react';
+import { Activity, FileBarChart, LogOut, ShieldAlert, Headset, CalendarDays, User, X, Network, BookOpen, Tv } from 'lucide-react';
 import { AiCore } from './AiCore';
 import { KIND_ICON, STATUS_STYLE } from './DevicePanel';
 import type { DeviceCard } from '../types';
@@ -120,6 +120,17 @@ export function HudSidebar({ user, onLogout, onAction, devices, onOpenDevice, on
               <span className="hud-label">PDF · logo</span>
             </button>
           )}
+          {/* NIA TV: tela de parede com as respostas das perguntas por voz */}
+          <a
+            href="/tv"
+            target="_blank"
+            rel="noopener"
+            className="mb-4 flex w-full items-center gap-2.5 rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-left text-sm text-violet-100 transition-all hover:bg-violet-500/20"
+          >
+            <Tv className="h-4 w-4" />
+            <span className="flex-1">NIA TV</span>
+            <span className="hud-label">voz · ao vivo</span>
+          </a>
           <div className="hud-label mb-2 px-1">Ações rápidas</div>
           <div className="space-y-1">
             {QUICK_ACTIONS.map((a) => (

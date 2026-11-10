@@ -108,7 +108,7 @@ const TOOL_LABELS: Record<string, string> = {
   base_conhecimento: 'Base de conhecimento',
   resposta_geral: 'IA · escrevendo a resposta',
 };
-const toolLabel = (name: string) => TOOL_LABELS[name] ?? name;
+export const toolLabel = (name: string) => TOOL_LABELS[name] ?? name;
 
 const greeting = () => {
   const h = Number(new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', hour12: false }));

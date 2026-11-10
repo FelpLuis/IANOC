@@ -338,6 +338,10 @@ export interface WSMessage {
 export type WSMessageType = 
   | 'welcome'
   | 'dashboard'
+  | 'tv_historico'
+  | 'tv_pensando'
+  | 'tv_etapa'
+  | 'tv_resultado'
   | 'chat_start'
   | 'chat_response'
   | 'memory'

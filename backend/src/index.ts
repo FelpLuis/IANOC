@@ -20,6 +20,7 @@ import { warmKokoro } from './noc/kokoro.js';
 import multer from 'multer';
 import { adicionarArquivo as kbAdicionar, caminhoArquivo as kbCaminho, listar as kbListar, obter as kbObter, remover as kbRemover, type KbTipo } from './noc/kb.js';
 import { gerarDocumento, lerIdentidade, salvarIdentidade } from './noc/documento.js';
+import { inscreverTv, rodadaDeVoz } from './noc/tv.js';
 import { cancelar as cancelarAcao, confirmar as confirmarAcao } from './noc/acoes.js';
 import { authenticateUpgrade, authEnabled, clientIp, ipAllowed, handleLogin, handleLogout, handleMe, handlePassword, requireAuth, type SessionUser } from './auth.js';
 import type { IncomingMessage } from 'http';
@@ -457,20 +458,28 @@ async function handleWebSocketMessage(clientId: string, ws: WebSocket, message: 
       console.log(`[chat] ${clientUsers.get(clientId)}: ${String(request.message).slice(0, 200).replace(/\s+/g, ' ')}`);
       
       sendToClient(ws, { type: 'chat_start', payload: { message: request.message } });
+      // Pergunta por voz: também vai para as telas da NIA TV (noc/tv.ts).
+      const tv = request.voice ? rodadaDeVoz(String(request.message), clientUsers.get(clientId) || 'NOC') : null;
 
       try {
         const response = await agent.chat(
           { ...request, conversationId: request.conversationId || clientId },
-          (event) => sendToClient(ws, { type: event.type, payload: event }),
+          (event) => { sendToClient(ws, { type: event.type, payload: event }); tv?.evento(event as { type: string; name?: string; dashboard?: unknown }); },
         );
         sendToClient(ws, { type: 'chat_response', payload: response }, requestId);
+        tv?.fim(response.message, { modelo: response.metadata?.modelUsed });
       } catch (error) {
         console.error('[WS] Chat error:', error);
-        sendToClient(ws, {
-          type: 'chat_response',
-          payload: { message: `⚠️ Falha ao consultar o assistente: ${error instanceof Error ? error.message : 'erro desconhecido'}` },
-        }, requestId);
+        const falha = `⚠️ Falha ao consultar o assistente: ${error instanceof Error ? error.message : 'erro desconhecido'}`;
+        sendToClient(ws, { type: 'chat_response', payload: { message: falha } }, requestId);
+        tv?.fim(falha, { erro: true });
       }
+      break;
+    }
+
+    case 'tv_subscribe': {
+      inscreverTv(ws);
+      console.log(`[tv] ${clientUsers.get(clientId)} abriu a NIA TV`);
       break;
     }
 
