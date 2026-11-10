@@ -103,6 +103,7 @@ const TOOL_LABELS: Record<string, string> = {
   ixc_logins_online: 'IXC · logins PPPoE online',
   web_pesquisa: 'Web · busca e leitura das fontes',
   base_conhecimento: 'Base de conhecimento',
+  resposta_geral: 'IA · escrevendo a resposta',
 };
 const toolLabel = (name: string) => TOOL_LABELS[name] ?? name;
 

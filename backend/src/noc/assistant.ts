@@ -21,6 +21,7 @@ import { askOpenAiCompatible, openAiConfigured, resetOpenAiConversation } from '
 import { extractReport, REPORT_TOOL } from './report.js';
 import { extractDevices, type DeviceCard } from './devices.js';
 import { askNative, NATIVE_LABEL, resetNative } from './native/engine.js';
+import { llmGeral } from './native/geral.js';
 
 type MessageParam = Anthropic.Beta.Messages.BetaMessageParam;
 type ToolResult = Anthropic.Beta.Messages.BetaToolResultBlockParam;
@@ -49,7 +50,10 @@ const usesNative = () => nocConfig.llm.provider === 'nativo';
 
 /** Nome do modelo em uso, para status e logs. */
 export function llmLabel(): string {
-  if (usesNative()) return NATIVE_LABEL;
+  if (usesNative()) {
+    const geral = llmGeral();
+    return geral ? `NIA · motor nativo + ${geral.model.replace(/^.*\//, '')} (perguntas gerais)` : NATIVE_LABEL;
+  }
   return usesClaude() ? `Claude (${nocConfig.llm.model})` : `${nocConfig.openai.provider} (${nocConfig.openai.model || 'modelo não definido'})`;
 }
 

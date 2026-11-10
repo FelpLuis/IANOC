@@ -27,6 +27,7 @@ import { horaLocal } from '../http.js';
 import { dur } from './analysis.js';
 import { parse, norm, type Intent, type Parsed, type Periodo } from './nlu.js';
 import * as nia from './persona.js';
+import { calcular, dataHora, llmGeral, resetGeral, responderGeral } from './geral.js';
 
 type Emit = (e: AssistantEvent) => void;
 type Rec = Record<string, unknown>;
@@ -76,6 +77,8 @@ const statusIxc = (map: Record<string, string>, v: unknown) => map[String(v ?? '
 
 class Turn {
   toolsUsed: string[] = [];
+  /** Modelo de linguagem usado na resposta (só nas perguntas gerais). */
+  modelo?: string;
   constructor(private emit: Emit) {}
 
   async call<T = Rec>(name: string, input: Rec): Promise<{ ok: boolean; data: T; text: string }> {
@@ -506,6 +509,7 @@ async function pesquisa(t: Turn, q: Parsed): Promise<string> {
     .replace(/(^|\s)(deste|desse|destes|desses|este|esse|link|links|site|p[aá]gina|url)(?=\s|$|[,.:])/gi, ' ');
   // Com link e sem assunto claro, o título vem da própria página (buildManual).
   const tema = temaDe(semLinks);
+  if (modo === 'pesquisa' && !links.length && llmGeral()) return geral(t, q);
   if (tema.length < 3 && !links.length) return 'Sobre o quê, Chefe? Exemplo: "gere um manual de como configurar a ONU Huawei HG8245H" ou "gere um manual a partir de https://…".';
   const buscaLigada = provedorBusca();
   const m = await t.track('web_pesquisa', { tema, modo, links: links.length }, () => buildManual(tema, modo, undefined, links));
@@ -734,6 +738,7 @@ const AJUDA = [
   '- **Histórico** — "quais hosts mais caíram na semana?", "incidentes de ontem"',
   '- **Relatórios** — "relatório de hoje", "relatório da semana", "relatório do mês"',
   '- **Topologia 3D** — "gere a topologia 3D da rede backbone", "mapa da rede"',
+  '- **Perguntas gerais** — "quanto é 15% de 230?", "que horas são?", "quem inventou a fibra óptica?" (pesquiso na web e respondo)',
   '- **Base de conhecimento** — "o que diz o manual sobre troca de ONU?", "procure nos documentos sobre VLAN" (envie PDFs em Base e identidade)',
   '- **Cadastros (com confirmação)** — "cadastre no zabbix o host X com IP 10.0.0.5 no grupo OLTs UpDown", cliente, POP, equipamento ou enlace no sistema NOC',
   '- **Manuais e pesquisa na web** — "gere um manual de como configurar a ONU HG8245H", "pesquise na web sobre GPON"',
@@ -757,6 +762,10 @@ export async function askNative(sessionId: string, message: string, onEvent: Emi
   contexts.set(sessionId, ctx);
   const q = parse(message, k.equipamentos);
 
+  // Contas e data/hora: respondidas na hora, sem consultar nada.
+  const direta = calcular(message) ?? dataHora(message);
+  if (direta) return { text: direta, model: NATIVE_LABEL, toolsUsed: [], usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+
   // Seguimento: "e ontem?", "e o 6730?", "e na semana?" herdam a intenção anterior.
   const curta = q.texto.split(' ').length <= 6 && /^(e|e o|e a|e no|e na|e do|e da|agora|e agora|mesma coisa|e para|e pro)\b/.test(q.texto);
   // Só herda em continuação curta ("e ontem?"); pergunta solta e desconhecida não herda o assunto.
@@ -777,8 +786,18 @@ export async function askNative(sessionId: string, message: string, onEvent: Emi
     else if (q.cliente) q.intent = 'cliente';
     else if (q.protocolo) q.intent = 'opa_protocolo';
     else if (q.caixa) q.intent = 'ftth';
-    else if (q.host) q.intent = 'alarmes';
+    // Nome solto ("na OLT do Casqueiro", "no NE8000") vira alarme; "capital da Austrália" não.
+    else if (q.host && (VOCAB_NOC.test(q.texto) || /\d/.test(q.host))) q.intent = 'alarmes';
+    // Fora dos sistemas do NOC: pergunta geral (web + modelo, se configurado).
+    else q.intent = 'geral';
   }
+  // "Como está o tempo?" casa com "como está o…" mas não cita equipamento nenhum.
+  if (q.intent === 'equipamento' && !q.equipamentos.length && !q.host && !VOCAB_NOC.test(q.texto)) q.intent = 'geral';
+  // "Quem inventou a fibra óptica?": palavra do NOC, mas pergunta de conhecimento geral (sem caixa, equipamento ou host citado).
+  if (['ftth', 'onus', 'equipamento', 'conectados', 'os_ixc'].includes(q.intent) && !q.caixa && !q.equipamentos.length && !q.host
+    && /^(quem (inventou|criou|descobriu|desenvolveu|foi|e|era)|quando (foi|surgiu|inventaram|criaram|comecou)|por ?que (a|o|as|os) |qual (e |foi )?a (historia|origem|diferenca)|historia d|origem d|diferenca entre)/.test(q.texto)) q.intent = 'geral';
+  // Assunto claramente de fora ("o tempo em Santos", "cotação do dólar") vence o nome de um POP citado de passagem.
+  if (['equipamento', 'conectados', 'alarmes'].includes(q.intent) && ASSUNTO_GERAL.test(q.texto) && !/\b(alarm|olt|onu|switch|roteador|porta|enlace|link)/.test(q.texto)) q.intent = 'geral';
 
   const t = new Turn(onEvent);
   t.conversa = sessionId;
@@ -789,7 +808,7 @@ export async function askNative(sessionId: string, message: string, onEvent: Emi
     text = nia.erro(e instanceof Error ? e.message : String(e));
   }
   if (!['saudacao', 'agradecimento', 'ajuda', 'desconhecido'].includes(q.intent)) { ctx.last = q; ctx.lastIntent = q.intent; }
-  return { text, model: NATIVE_LABEL, toolsUsed: t.toolsUsed, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+  return { text, model: t.modelo ? `NIA · ${t.modelo} (pergunta geral)` : NATIVE_LABEL, toolsUsed: t.toolsUsed, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
 }
 
 async function responder(t: Turn, q: Parsed, k: Knowledge): Promise<string> {
@@ -819,11 +838,24 @@ async function responder(t: Turn, q: Parsed, k: Knowledge): Promise<string> {
     case 'os_ixc': return on('ixc') ? osIxc(t, q) : 'O IXC não está configurado neste servidor.';
     case 'cliente': return cliente(t, q);
     case 'ftth': return ftth(t, q);
+    case 'geral': return geral(t, q);
     default:
       return `${nia.naoEntendi(cut(q.original, 80))}\n\n${AJUDA.split('\n').slice(1).join('\n')}`;
   }
 }
 
+const VOCAB_NOC = /\b(equipamento|porta|interface|olt|onu|ont|switch|roteador|host|enlace|link|modelo|fabricante|backbone|pop|servidor|concentrador|bras|bng|cto|ceo|alarme|sinal|rede|cliente)s?\b/;
+const ASSUNTO_GERAL = /\b(previsao do tempo|(como (esta|ta|vai (estar|ficar))|e) o tempo|clima|temperatura|vai chover|chuva|cotacao|dolar|euro|bitcoin|noticias?|placar|jogo d[oe]|horoscopo|receita de|capital d[aoe])\b/;
+
+/** Pergunta de conhecimento geral: pesquisa na web e responde (native/geral.ts). */
+async function geral(t: Turn, q: Parsed): Promise<string> {
+  const r = await responderGeral(t.conversa, q.original, (name, input, fn) => t.track(name, input, fn));
+  if (r.modelo) t.modelo = r.modelo;
+  if (r.text) return r.text;
+  return `${nia.naoEntendi(cut(q.original, 80))}\n\n${AJUDA.split('\n').slice(1).join('\n')}`;
+}
+
 export function resetNative(sessionId: string) {
+  resetGeral(sessionId);
   contexts.delete(sessionId);
 }

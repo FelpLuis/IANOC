@@ -71,18 +71,24 @@ async function searxng(q: string, limite: number): Promise<SearchResult[]> {
 }
 
 /** Tavily (API de busca para pesquisa automatizada; plano gratuito com créditos mensais). */
-async function tavily(q: string, limite: number): Promise<SearchResult[]> {
+async function tavily(q: string, limite: number, resposta = false): Promise<Busca> {
   const key = process.env.TAVILY_API_KEY || '';
   const r = await fetch('https://api.tavily.com/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-    body: JSON.stringify({ api_key: key, query: q, max_results: Math.min(limite, 10), search_depth: 'basic', country: 'brazil' }),
+    body: JSON.stringify({ api_key: key, query: q, max_results: Math.min(limite, 10), search_depth: 'basic', country: 'brazil', ...(resposta ? { include_answer: 'basic' } : {}) }),
     signal: AbortSignal.timeout(15000),
   });
   if (!r.ok) throw new Error(`Tavily HTTP ${r.status}`);
-  const j = (await r.json()) as { results?: Array<{ title: string; url: string; content?: string }> };
-  return (j.results ?? []).map((x) => ({ title: limpa(x.title), url: x.url, snippet: limpa(x.content ?? ''), fonte: 'web' as const }));
+  const j = (await r.json()) as { answer?: string; results?: Array<{ title: string; url: string; content?: string }> };
+  return {
+    resposta: j.answer ? limpa(j.answer) : undefined,
+    results: (j.results ?? []).map((x) => ({ title: limpa(x.title), url: x.url, snippet: limpa(x.content ?? ''), fonte: 'web' as const })),
+  };
 }
+
+/** Resultado da busca: resposta curta pronta (só a Tavily dá) e os links. */
+export interface Busca { resposta?: string; results: SearchResult[] }
 
 /** Qual busca da web está configurada (nenhuma: só Wikipédia e links informados). */
 export function provedorBusca(): string | null {
@@ -93,26 +99,31 @@ export function provedorBusca(): string | null {
 }
 
 // Cache de 1 h por consulta: o mesmo pedido não gasta crédito de novo.
-const cacheBusca = new Map<string, { em: number; r: SearchResult[] }>();
+const cacheBusca = new Map<string, { em: number; r: Busca }>();
 
 /**
  * Busca da web só por API oficial (Tavily, Brave) ou pelo SearXNG da própria empresa.
  * Não raspa página de resultado de buscador nem contorna bloqueio anti-robô.
  */
-async function buscaWeb(q: string, limite: number): Promise<SearchResult[]> {
-  if (process.env.TAVILY_API_KEY) return tavily(q, limite);
-  if (process.env.BRAVE_API_KEY) return brave(q, limite);
-  if (process.env.SEARXNG_URL) return searxng(q, limite);
-  return [];
+async function buscaWeb(q: string, limite: number, resposta: boolean): Promise<Busca> {
+  if (process.env.TAVILY_API_KEY) return tavily(q, limite, resposta);
+  if (process.env.BRAVE_API_KEY) return { results: await brave(q, limite) };
+  if (process.env.SEARXNG_URL) return { results: await searxng(q, limite) };
+  return { results: [] };
 }
 
 /** Resultados da web (sem bloqueados e sem repetir site) + Wikipédia. */
 export async function searchWeb(q: string, limite = 8): Promise<SearchResult[]> {
-  const chave = `${q.toLowerCase()}|${limite}`;
+  return (await pesquisarWeb(q, limite)).results;
+}
+
+/** Busca com a resposta curta pronta (quando o provedor dá) + resultados filtrados. */
+export async function pesquisarWeb(q: string, limite = 8, resposta = false): Promise<Busca> {
+  const chave = `${q.toLowerCase()}|${limite}|${resposta ? 'r' : ''}`;
   const hit = cacheBusca.get(chave);
   if (hit && Date.now() - hit.em < 3600_000) return hit.r;
-  const [web, wiki] = await Promise.allSettled([buscaWeb(q, limite * 2), wikipedia(q, 2)]);
-  const lista = [...(web.status === 'fulfilled' ? web.value : []), ...(wiki.status === 'fulfilled' ? wiki.value : [])];
+  const [web, wiki] = await Promise.allSettled([buscaWeb(q, limite * 2, resposta), wikipedia(q, 2)]);
+  const lista = [...(web.status === 'fulfilled' ? web.value.results : []), ...(wiki.status === 'fulfilled' ? wiki.value : [])];
   const sites = new Set<string>();
   const r = lista.filter((x) => {
     if (BLOQUEADOS.test(x.url)) return false;
@@ -122,8 +133,19 @@ export async function searchWeb(q: string, limite = 8): Promise<SearchResult[]> 
     sites.add(host);
     return true;
   }).slice(0, limite);
-  if (r.length) cacheBusca.set(chave, { em: Date.now(), r });
-  return r;
+  const out: Busca = { resposta: web.status === 'fulfilled' ? web.value.resposta : undefined, results: r };
+  if (r.length) cacheBusca.set(chave, { em: Date.now(), r: out });
+  return out;
+}
+
+/** Resumo do verbete da Wikipédia em português (API oficial, sem chave). */
+export async function resumoWikipedia(titulo: string): Promise<string | null> {
+  const res = await getText(`https://pt.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(titulo.replace(/ /g, '_'))}`).catch(() => null);
+  if (!res) return null;
+  try {
+    const j = JSON.parse(res.html) as { extract?: string; type?: string };
+    return j.type === 'disambiguation' || !j.extract ? null : limpa(j.extract);
+  } catch { return null; }
 }
 
 /** Proporção de palavras típicas do português: separa pt de es/en. */

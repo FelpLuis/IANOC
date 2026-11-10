@@ -17,7 +17,7 @@ const env = (key: string) => String(process.env[key] ?? '').trim();
 const stripSlash = (value: string) => value.replace(/\/+$/, '');
 
 /** Endereços dos provedores no formato OpenAI (chat/completions com ferramentas). */
-const OPENAI_PRESETS: Record<string, string> = {
+export const OPENAI_PRESETS: Record<string, string> = {
   ollama: 'http://127.0.0.1:11434/v1',
   groq: 'https://api.groq.com/openai/v1',
   gemini: 'https://generativelanguage.googleapis.com/v1beta/openai',
