@@ -15,6 +15,7 @@ import { horaLocal } from './http.js';
 import { llmComplete } from './llm-complete.js';
 import { analyzeReport } from './native/analysis.js';
 import { nocConfig } from './config.js';
+import { montarDashboard } from './dashboard.js';
 
 export const REPORT_TOOL = 'relatorio_noc';
 export type Periodo = 'hoje' | 'ontem' | 'semana' | 'mes' | 'personalizado';
@@ -187,9 +188,19 @@ export async function buildReport(opts: { periodo: Periodo; desde?: string; ate?
 
   const titulo = `# Relatório operacional do NOC — ${nome}`;
   const rodape = `---\n_Gerado em ${horaLocal(new Date())} (horário de Brasília) a partir de ${[...fontes].join(', ')}. Números lidos diretamente dos sistemas; a análise foi gerada pelo IA NOC com base neles._`;
+  const NOMES: Record<Fonte, string> = { zabbix: 'Zabbix', ixc: 'IXC', opa: 'Opa! Suite' };
   return {
     markdown: [titulo, analise, ...md, rodape].filter(Boolean).join('\n\n'),
     resumo: digest.join('\n'),
+    // Mesmos números, organizados para o painel visual (não vai para o modelo de linguagem).
+    dashboard: montarDashboard({
+      nome, from, to, fontes: [...fontes].map((f) => NOMES[f]),
+      z: zbx?.ok ? zbx.value : undefined,
+      a: zbxAbertos?.ok ? zbxAbertos.value : undefined,
+      ixc: ixc?.ok ? ixc.value : undefined,
+      opa: opa?.ok ? opa.value : undefined,
+      indisponiveis, analise,
+    }),
   };
 }
 

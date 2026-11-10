@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { ws } from '../services/websocket';
-import type { AgentMemory, ProjectInfo, FileInfo, ChatResponse, AgentAction, ScanResult, Message, ToolActivity, DeviceCard, TopologyGraph, AcaoPendente } from '../types';
+import type { AgentMemory, ProjectInfo, FileInfo, ChatResponse, AgentAction, ScanResult, Message, ToolActivity, DeviceCard, TopologyGraph, AcaoPendente, Dashboard } from '../types';
 
 export function useAgent() {
   const [memory, setMemory] = useState<AgentMemory | null>(null);
@@ -16,6 +16,7 @@ export function useAgent() {
   const turnTopology = useRef<TopologyGraph | null>(null);
   const turnActions = useRef<Array<{ url: string; label: string; opened: boolean }>>([]);
   const turnPendentes = useRef<AcaoPendente[]>([]);
+  const turnDashboard = useRef<Dashboard | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const initialized = useRef(false);
@@ -77,7 +78,9 @@ export function useAgent() {
           ...(turnTopology.current ? { topology: turnTopology.current } : {}),
           ...(turnActions.current.length ? { actions: turnActions.current } : {}),
           ...(turnPendentes.current.length ? { pendentes: turnPendentes.current } : {}),
+          ...(turnDashboard.current ? { dashboard: turnDashboard.current } : {}),
         };
+        turnDashboard.current = null;
         turnActions.current = [];
         turnPendentes.current = [];
         turnDevices.current = new Map();
@@ -114,6 +117,12 @@ export function useAgent() {
     const unsubscribePending = ws.on('pending_action', (msg) => {
       const e = msg.payload as { acao?: AcaoPendente };
       if (e.acao?.id) turnPendentes.current.push(e.acao);
+    });
+
+    // Dashboard do relatório: vai junto com a resposta e aparece como painel visual.
+    const unsubscribeDashboard = ws.on('dashboard', (msg) => {
+      const e = msg.payload as { dashboard?: Dashboard };
+      if (e.dashboard?.kpis) turnDashboard.current = e.dashboard;
     });
 
     const unsubscribeProjects = ws.on('projects', (msg) => {
@@ -169,6 +178,7 @@ export function useAgent() {
       unsubscribeToolEnd();
       unsubscribeOpen();
       unsubscribePending();
+      unsubscribeDashboard();
       unsubscribeProjects();
       unsubscribeProject();
       unsubscribeFiles();

@@ -129,68 +129,118 @@ function encaixarNoMolde(md: string, molde: { titulo: string }[]): { titulo?: st
   return { titulo: s.titulo, corpo: partes.join('\n\n') };
 }
 
-function logoDataUrl(id?: string): string | undefined {
+const dataUrl = (arquivo: string, mime = 'image/png') => `data:${mime};base64,${readFileSync(arquivo).toString('base64')}`;
+// Versão branca do logo oficial, para a faixa escura do topo.
+const LOGO_BRANCO = LOGO_PADRAO.map((p) => p.replace('updown-internet-escuro.png', 'updown-internet-branco.png'));
+
+/** Logo da faixa do topo: o enviado na base (num selo claro) ou o oficial branco. */
+function logoDoTopo(id?: string): { src?: string; selo: boolean } {
   const d = id ? obter(id) : undefined;
-  if (!d || !existsSync(caminhoArquivo(d))) {
-    const padrao = LOGO_PADRAO.find((p) => existsSync(p));
-    return padrao ? `data:image/png;base64,${readFileSync(padrao).toString('base64')}` : undefined;
-  }
-  const mime = d.ext === 'svg' ? 'image/svg+xml' : d.mime || `image/${d.ext}`;
-  return `data:${mime};base64,${readFileSync(caminhoArquivo(d)).toString('base64')}`;
+  if (d && existsSync(caminhoArquivo(d))) return { src: dataUrl(caminhoArquivo(d), d.ext === 'svg' ? 'image/svg+xml' : d.mime || `image/${d.ext}`), selo: true };
+  const branco = LOGO_BRANCO.find((p) => existsSync(p));
+  if (branco) return { src: dataUrl(branco), selo: false };
+  const escuro = LOGO_PADRAO.find((p) => existsSync(p));
+  return { src: escuro ? dataUrl(escuro) : undefined, selo: true };
 }
 
-export function gerarDocumento(opts: { markdown: string; moldeId?: string; autor?: string }): string {
+/** Indicadores do dashboard (quando a resposta tem um), mostrados no topo do documento. */
+export interface KpiDoc { rotulo: string; valor: string; detalhe?: string; tom?: string }
+const TOM_DOC: Record<string, string> = { ok: '#0fb39a', atencao: '#d99a00', critico: '#e5135c', info: '#0b8fc4', marca: '#8a08c4' };
+
+export function gerarDocumento(opts: {
+  markdown: string; moldeId?: string; autor?: string;
+  kpis?: KpiDoc[]; status?: { texto: string; tom?: string }; periodo?: string;
+}): string {
   const id = lerIdentidade();
   const molde = opts.moldeId ? obter(opts.moldeId) : (id.moldePadraoId ? obter(id.moldePadraoId) : undefined);
   const usarMolde = molde?.tipo === 'molde' && molde.secoes?.length;
   const base = usarMolde ? encaixarNoMolde(opts.markdown, molde!.secoes!) : (() => { const s = secoes(opts.markdown); return { titulo: s.titulo, corpo: opts.markdown.replace(/^#\s+.+\n?/, '') }; })();
   const titulo = base.titulo ?? (opts.markdown.match(/^#{1,3}\s+(.+)$/m)?.[1] ?? 'Documento NIA');
   const html = marked.parse(base.corpo.replace(/\s\[(\d{1,2})\]/g, '<sup>[$1]</sup>'), { async: false }) as string;
-  const logo = logoDataUrl(id.logoId);
+  const logo = logoDoTopo(id.logoId);
   const quando = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'long', timeStyle: 'short', timeZone: 'America/Sao_Paulo' }).format(new Date());
   const { primaria, secundaria, destaque } = id.cores;
   const cab = molde?.cabecalho && usarMolde ? `<div class="molde-cab">${esc(molde.cabecalho)}</div>` : '';
+  const kpis = (opts.kpis ?? []).slice(0, 6);
+  const corStatus = TOM_DOC[opts.status?.tom ?? ''] ?? primaria;
+  const kpisHtml = kpis.length
+    ? `<div class="kpis">${kpis.map((k) => `<div class="kpi" style="--c:${TOM_DOC[k.tom ?? ''] ?? primaria}"><span>${esc(k.rotulo)}</span><b>${esc(k.valor)}</b>${k.detalhe ? `<em>${esc(k.detalhe)}</em>` : ''}</div>`).join('')}</div>`
+    : '';
+  const logoHtml = !logo.src ? '' : logo.selo ? `<span class="selo"><img src="${logo.src}" alt="logo"></span>` : `<img src="${logo.src}" alt="logo">`;
 
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(titulo)}</title>
 <style>
-  @page { size: A4; margin: 18mm 16mm 20mm; }
+  @page { size: A4; margin: 14mm 14mm 16mm; }
   * { box-sizing: border-box; }
-  body { font: 11pt/1.55 "Segoe UI", system-ui, -apple-system, sans-serif; color: #1f2937; margin: 0; }
-  .topo { display: flex; align-items: center; gap: 16px; padding-bottom: 12px; border-bottom: 3px solid ${primaria}; }
-  .topo img { max-height: 56px; max-width: 200px; object-fit: contain; }
-  .topo .emp { flex: 1; }
-  .topo .emp strong { display: block; font-size: 15pt; color: ${secundaria}; }
-  .topo .emp span { color: #64748b; font-size: 9.5pt; }
-  .topo .data { text-align: right; color: #64748b; font-size: 9pt; }
-  .molde-cab { color: #64748b; font-size: 9pt; margin-top: 6px; }
-  h1.titulo { font-size: 19pt; color: ${secundaria}; margin: 18px 0 4px; }
-  .faixa { height: 4px; width: 80px; background: ${destaque}; border-radius: 2px; margin-bottom: 14px; }
-  h2 { font-size: 13.5pt; color: ${primaria}; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; margin-top: 22px; break-after: avoid; }
-  h3 { font-size: 11.5pt; color: ${secundaria}; margin-top: 14px; break-after: avoid; }
-  table { border-collapse: collapse; width: 100%; margin: 8px 0 14px; font-size: 9.5pt; }
-  th { background: ${primaria}; color: #fff; text-align: left; padding: 5px 8px; }
-  td { border-bottom: 1px solid #e2e8f0; padding: 4px 8px; vertical-align: top; }
-  tr:nth-child(even) td { background: #f8fafc; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { font: 10.5pt/1.6 "Segoe UI", Inter, system-ui, -apple-system, sans-serif; color: #1e1b4b; margin: 0; background: #fff; }
+  .pagina { max-width: 900px; margin: 0 auto; padding: 18px 16px 28px; }
+  /* Faixa do topo: degradê da marca com a grade da NIA */
+  .topo { position: relative; overflow: hidden; display: flex; align-items: center; gap: 18px; padding: 20px 24px; border-radius: 16px; color: #fff;
+    background: linear-gradient(115deg, ${secundaria} 0%, ${primaria} 50%, ${destaque} 100%); }
+  .topo::before { content: ""; position: absolute; inset: 0; opacity: .16;
+    background-image: linear-gradient(rgba(255,255,255,.6) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.6) 1px, transparent 1px);
+    background-size: 26px 26px; -webkit-mask-image: linear-gradient(90deg, transparent 20%, #000); mask-image: linear-gradient(90deg, transparent 20%, #000); }
+  .topo::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: linear-gradient(90deg, #12baea, rgba(255,255,255,.6), #c874f8); }
+  .topo > * { position: relative; }
+  .topo img { max-height: 46px; max-width: 190px; object-fit: contain; display: block; }
+  .topo .selo { background: #fff; border-radius: 10px; padding: 6px 10px; }
+  .topo .emp { flex: 1; min-width: 0; padding-left: 16px; border-left: 1px solid rgba(255,255,255,.35); }
+  .topo .emp small { display: block; font: 600 7.5pt/1.2 Consolas, "JetBrains Mono", monospace; letter-spacing: .26em; text-transform: uppercase; opacity: .85; }
+  .topo .emp strong { display: block; font-size: 14pt; margin-top: 3px; }
+  .topo .data { text-align: right; font-size: 8.5pt; opacity: .92; }
+  .molde-cab { color: #64748b; font-size: 9pt; margin-top: 8px; }
+  .cabeca { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin: 22px 0 0; }
+  h1.titulo { font-size: 20pt; line-height: 1.15; color: ${secundaria}; margin: 0; letter-spacing: -.01em; }
+  .periodo { color: #6a7096; font-size: 9.5pt; margin-top: 4px; }
+  .status { flex-shrink: 0; display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 999px; font: 700 7.5pt/1 Consolas, monospace; letter-spacing: .16em; text-transform: uppercase;
+    color: ${corStatus}; border: 1px solid ${corStatus}66; background: ${corStatus}12; }
+  .status i { width: 7px; height: 7px; border-radius: 50%; background: ${corStatus}; }
+  .faixa { height: 4px; border-radius: 2px; margin: 12px 0 18px; background: linear-gradient(90deg, #12baea, ${primaria} 40%, ${destaque} 70%, transparent); }
+  .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 0 0 18px; }
+  .kpi { position: relative; padding: 11px 14px 11px 17px; border-radius: 12px; background: linear-gradient(180deg, #f7f5ff, #fff); border: 1px solid #e6e2fb; break-inside: avoid; overflow: hidden; }
+  .kpi::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--c); }
+  .kpi span { display: block; font: 600 7pt/1.3 Consolas, monospace; letter-spacing: .14em; text-transform: uppercase; color: #6a7096; }
+  .kpi b { display: block; font-size: 17pt; line-height: 1.2; margin-top: 4px; color: ${secundaria}; }
+  .kpi em { display: block; font-style: normal; font-size: 8pt; color: #6a7096; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  h2 { display: flex; align-items: center; gap: 9px; font-size: 13pt; color: ${secundaria}; margin: 26px 0 10px; padding-bottom: 6px; border-bottom: 1px solid #e6e2fb; break-after: avoid; }
+  h2::before { content: ""; width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; background: linear-gradient(135deg, #12baea, ${destaque}); }
+  h3 { font-size: 10pt; color: ${primaria}; margin: 16px 0 6px; text-transform: uppercase; letter-spacing: .06em; break-after: avoid; }
+  p { margin: 6px 0 10px; }
+  ul { padding-left: 18px; } li { margin: 3px 0; } li::marker { color: ${destaque}; }
+  table { border-collapse: separate; border-spacing: 0; width: 100%; margin: 8px 0 16px; font-size: 8.8pt; border: 1px solid #e6e2fb; border-radius: 10px; overflow: hidden; }
+  th { background: linear-gradient(90deg, ${secundaria}, ${primaria}); color: #fff; text-align: left; padding: 7px 10px; font: 600 7.5pt/1.2 Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
+  td { border-top: 1px solid #efedfb; padding: 6px 10px; vertical-align: top; }
+  tr:nth-child(even) td { background: #faf9ff; }
   tr { break-inside: avoid; }
-  blockquote { border-left: 4px solid ${destaque}; margin: 10px 0; padding: 4px 12px; background: #f6f0fe; color: #3f065a; }
+  blockquote { border-left: 4px solid ${destaque}; margin: 12px 0; padding: 8px 14px; border-radius: 0 10px 10px 0; background: linear-gradient(90deg, #f6f0fe, #fbf9ff); color: #3f065a; }
+  blockquote p { margin: 0; }
+  hr { border: 0; height: 1px; background: #e6e2fb; margin: 20px 0; }
   a { color: ${primaria}; }
-  sup { color: ${primaria}; font-size: 7.5pt; }
-  code { background: #f1f5f9; padding: 1px 4px; border-radius: 3px; font-size: 9pt; }
-  .rodape { margin-top: 28px; padding-top: 8px; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 8.5pt; display: flex; justify-content: space-between; gap: 12px; }
-  .acoes { position: fixed; top: 12px; right: 12px; }
-  .acoes button { background: ${primaria}; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; font-size: 10pt; cursor: pointer; }
-  @media print { .acoes { display: none; } }
+  sup { color: ${primaria}; font-size: 7pt; }
+  code { background: #f1effc; padding: 1px 5px; border-radius: 4px; font-size: 8.5pt; }
+  .rodape { margin-top: 30px; padding-top: 10px; border-top: 1px solid #e6e2fb; color: #6a7096; font-size: 8pt; display: flex; justify-content: space-between; gap: 12px; }
+  .rodape b { font: 600 7pt Consolas, monospace; letter-spacing: .18em; text-transform: uppercase; color: ${primaria}; }
+  .acoes { position: fixed; bottom: 16px; right: 16px; }
+  .acoes button { background: linear-gradient(90deg, #12baea, ${primaria} 55%, ${destaque}); color: #fff; border: 0; border-radius: 10px; padding: 10px 16px; font: 600 10pt "Segoe UI", sans-serif; cursor: pointer; box-shadow: 0 8px 24px -8px ${primaria}; }
+  @media print { .acoes { display: none; } .pagina { padding: 0; } }
 </style></head><body>
 <div class="acoes"><button onclick="window.print()">Imprimir / salvar PDF</button></div>
+<div class="pagina">
 <div class="topo">
-  ${logo ? `<img src="${logo}" alt="logo">` : ''}
-  <div class="emp"><strong>${esc(id.empresa)}</strong>${id.slogan ? `<span>${esc(id.slogan)}</span>` : ''}</div>
+  ${logoHtml}
+  <div class="emp"><small>NIA · ${esc(id.slogan || 'Centro de Operações de Rede')}</small><strong>${esc(id.empresa)}</strong></div>
   <div class="data">${esc(quando)}${opts.autor ? `<br>${esc(opts.autor)}` : ''}${usarMolde ? `<br>Molde: ${esc(molde!.nome)}` : ''}</div>
 </div>
 ${cab}
-<h1 class="titulo">${esc(titulo.replace(/[*_`]/g, ''))}</h1>
+<div class="cabeca">
+  <div><h1 class="titulo">${esc(titulo.replace(/[*_`]/g, ''))}</h1>${opts.periodo ? `<div class="periodo">${esc(opts.periodo)}</div>` : ''}</div>
+  ${opts.status ? `<span class="status"><i></i>${esc(opts.status.texto)}</span>` : ''}
+</div>
 <div class="faixa"></div>
+${kpisHtml}
 ${html}
-<div class="rodape"><span>${esc(id.rodape)}</span><span>Gerado pela NIA · IA NOC</span></div>
+<div class="rodape"><span>${esc(id.rodape)}</span><b>Gerado pela NIA · IA NOC</b></div>
+</div>
 </body></html>`;
 }

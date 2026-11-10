@@ -26,6 +26,7 @@ import {
 import { cn, formatRelativeTime } from '../utils/helpers';
 import { earcon, markdownToSpeech, resumoFalado, useVoice, type ListenEnd } from '../hooks/useVoice';
 import { abrirDocumento, downloadMarkdown } from '../utils/report';
+import { DashboardCard } from './dashboard/DashboardCard';
 import { VoiceStatus } from './VoiceStatus';
 import { VoiceOverlay } from './VoiceOverlay';
 import { ActionCard } from './ActionCard';
@@ -36,6 +37,8 @@ import type { Message, FileInfo, ToolActivity, DeviceCard, TopologyGraph } from 
 
 // Relatórios prontos: o assistente coleta das fontes e monta no formato do prompt (backend/src/noc/prompt.ts).
 const REPORTS: Array<{ label: string; prompt: string }> = [
+  { label: 'Dashboard de hoje', prompt: 'Abra o dashboard do NOC de hoje' },
+  { label: 'Dashboard da semana', prompt: 'Abra o dashboard do NOC da semana' },
   { label: 'Relatório do NOC de hoje', prompt: 'Gere o relatório operacional do NOC de hoje (00:00 até agora): incidentes no Zabbix, alarmes ainda abertos, ordens de serviço do IXC e atendimentos do Opa! Suite.' },
   { label: 'Relatório de ontem', prompt: 'Gere o relatório operacional do NOC de ontem (dia inteiro): incidentes no Zabbix, ordens de serviço do IXC e atendimentos do Opa! Suite, com pontos de atenção.' },
   { label: 'Incidentes da semana', prompt: 'Gere o relatório de incidentes de rede dos últimos 7 dias pelo Zabbix: hosts que mais caíram, tempo total em problema, problemas recorrentes e recomendações.' },
@@ -446,6 +449,9 @@ export function ChatInterface({
                     {isUser ? <div className="whitespace-pre-wrap text-[0.94rem] font-medium">{message.content}</div> : renderMessageContent(message.content, isNewest)}
                   </div>
 
+                  {/* Dashboard visual do relatório */}
+                  {!isUser && message.dashboard && <DashboardCard d={message.dashboard} messageId={message.id} novo={isNewest} />}
+
                   {/* Cadastros propostos: só gravam depois de Confirmar */}
                   {!isUser && message.pendentes?.map((a) => <ActionCard key={a.id} acao={a} />)}
 
@@ -546,7 +552,7 @@ export function ChatInterface({
                         </button>
                         <button
                           type="button"
-                          onClick={() => abrirDocumento(message.content)}
+                          onClick={() => abrirDocumento(message.content, message.dashboard)}
                           className="icon-btn p-1.5"
                           title="Gerar documento (PDF com a identidade visual e o molde)"
                         >

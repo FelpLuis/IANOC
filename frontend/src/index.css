@@ -271,3 +271,84 @@
 @media (prefers-reduced-motion: reduce) {
   .hud-bg::before, .hud-bg::after, .voice-bar, .reveal-stagger > * { animation: none !important; }
 }
+
+/* ------------------------------------------------------------------ dashboards (components/dashboard) */
+.dash-root {
+  border-radius: 1.25rem;
+  background:
+    radial-gradient(900px 420px at 100% 0%, rgba(26, 0, 168, 0.45), transparent 60%),
+    radial-gradient(700px 380px at 0% 100%, rgba(164, 10, 232, 0.18), transparent 60%),
+    linear-gradient(rgba(18, 186, 234, 0.05) 1px, transparent 1px) 0 0 / 44px 44px,
+    linear-gradient(90deg, rgba(18, 186, 234, 0.05) 1px, transparent 1px) 0 0 / 44px 44px,
+    #05021a;
+}
+.dash-card {
+  position: relative;
+  border-radius: 1rem;
+  background: linear-gradient(180deg, rgba(25, 17, 80, 0.72), rgba(9, 5, 36, 0.78));
+  border: 1px solid rgba(91, 140, 255, 0.16);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.025) inset, 0 24px 48px -30px rgba(0, 0, 0, 0.9);
+  backdrop-filter: blur(14px);
+}
+/* Borda com degradê ciano → roxo, só desenhada (máscara) */
+.dash-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(18, 186, 234, 0.45), transparent 35%, transparent 65%, rgba(164, 10, 232, 0.45));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+.dash-header {
+  background:
+    linear-gradient(100deg, rgba(26, 0, 168, 0.55), rgba(42, 18, 240, 0.18) 45%, rgba(164, 10, 232, 0.35)),
+    rgba(9, 5, 36, 0.8);
+}
+.dash-valor {
+  /* Longhand: com var() dentro da forma abreviada o CSS exportado perde o degradê. */
+  background-image: linear-gradient(180deg, #ffffff 30%, color-mix(in srgb, var(--dash-acc, #12baea) 75%, #ffffff));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 0 24px color-mix(in srgb, var(--dash-acc, #12baea) 35%, transparent);
+}
+.dash-table th {
+  padding: 0.55rem 0.75rem;
+  font: 500 10px/1.2 "JetBrains Mono", ui-monospace, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: #9be3f8;
+  background: linear-gradient(90deg, rgba(18, 186, 234, 0.14), rgba(164, 10, 232, 0.1));
+  border-bottom: 1px solid rgba(18, 186, 234, 0.25);
+}
+.dash-table th:first-child { border-top-left-radius: 0.5rem; }
+.dash-table th:last-child { border-top-right-radius: 0.5rem; }
+.dash-table td { padding: 0.5rem 0.75rem; color: #cbd5e1; border-bottom: 1px solid rgba(91, 140, 255, 0.09); vertical-align: top; }
+.dash-table tbody tr:hover td { background: rgba(18, 186, 234, 0.05); }
+.dash-scan::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, rgba(18, 186, 234, 0.12), transparent);
+  animation: dash-scan 5.5s ease-in-out infinite;
+}
+.dash-pulse { animation: dash-pulse 1.8s ease-in-out infinite; }
+.dash-draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: dash-draw 1.4s cubic-bezier(0.3, 0.7, 0.2, 1) forwards; }
+.dash-fade { animation: fadeIn 0.9s ease-out both; }
+.dash-grow { transform-origin: left; animation: dash-grow 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.dash-rise { transform-origin: bottom; animation: dash-rise 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes dash-scan { 0% { left: -30%; } 60%, 100% { left: 110%; } }
+@keyframes dash-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.75); } }
+@keyframes dash-draw { to { stroke-dashoffset: 0; } }
+@keyframes dash-grow { from { transform: scaleX(0); } }
+@keyframes dash-rise { from { transform: scaleY(0); } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .dash-draw, .dash-grow, .dash-rise, .dash-fade, .dash-scan::after, .dash-pulse { animation: none; stroke-dashoffset: 0; }
+}

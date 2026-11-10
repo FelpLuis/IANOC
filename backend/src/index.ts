@@ -199,7 +199,16 @@ app.post('/api/documento', (req, res) => {
   const markdown = String(req.body?.markdown || '');
   if (!markdown.trim()) return res.status(400).json({ error: 'Conteúdo vazio.' });
   const u = res.locals.user as SessionUser | undefined;
-  const html = gerarDocumento({ markdown, moldeId: req.body?.moldeId || undefined, autor: u ? `Solicitado por ${u.display_name || u.username}` : undefined });
+  // Indicadores do dashboard da resposta (opcionais): só texto curto, para o topo do documento.
+  const txt = (v: unknown, n = 80) => String(v ?? '').slice(0, n);
+  const kpis = Array.isArray(req.body?.kpis)
+    ? (req.body.kpis as Array<Record<string, unknown>>).slice(0, 6).map((k) => ({ rotulo: txt(k.rotulo, 40), valor: txt(k.valor, 24), detalhe: txt(k.detalhe), tom: txt(k.tom, 10) }))
+    : undefined;
+  const status = req.body?.status?.texto ? { texto: txt(req.body.status.texto, 30), tom: txt(req.body.status.tom, 10) } : undefined;
+  const html = gerarDocumento({
+    markdown, moldeId: req.body?.moldeId || undefined, autor: u ? `Solicitado por ${u.display_name || u.username}` : undefined,
+    kpis, status, periodo: req.body?.periodo ? txt(req.body.periodo, 120) : undefined,
+  });
   res.type('html').setHeader('Content-Security-Policy', "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'");
   res.send(html);
 });

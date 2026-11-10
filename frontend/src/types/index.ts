@@ -247,6 +247,7 @@ export interface Message {
   // Páginas que a NIA abriu (ou tentou abrir) no navegador para esta resposta.
   actions?: Array<{ url: string; label: string; opened: boolean }>;
   pendentes?: AcaoPendente[];
+  dashboard?: Dashboard;
 }
 
 export interface MessageMetadata {
@@ -336,6 +337,7 @@ export interface WSMessage {
 
 export type WSMessageType = 
   | 'welcome'
+  | 'dashboard'
   | 'chat_start'
   | 'chat_response'
   | 'memory'
@@ -422,4 +424,39 @@ export interface AcaoPendente {
   campos: Array<{ rotulo: string; valor: string }>;
   avisos: string[];
   expiraEm: number;
+}
+
+// ------------------------------------------------------------------ dashboards (backend noc/dashboard.ts)
+
+export type DashTom = 'ok' | 'atencao' | 'critico' | 'info' | 'marca';
+export type DashFormato = 'numero' | 'duracao_min' | 'horas';
+export interface DashKpi { id: string; rotulo: string; valor: string; detalhe?: string; tom: DashTom; icone: string }
+export interface DashSerie { rotulo: string; valor: number; cor?: string }
+export interface DashGrafico {
+  id: string;
+  tipo: 'linha' | 'rosca' | 'barras' | 'barras_h';
+  grupo: string;
+  titulo: string;
+  subtitulo?: string;
+  formato?: DashFormato;
+  largura?: 1 | 2;
+  series: DashSerie[];
+}
+export interface DashTabela { grupo: string; titulo: string; colunas: string[]; linhas: string[][]; tons?: Array<DashTom | null | undefined> }
+export interface Dashboard {
+  id: string;
+  titulo: string;
+  periodo: string;
+  intervalo: string;
+  geradoEm: string;
+  fontes: string[];
+  status: { tom: DashTom; texto: string };
+  resumo?: string;
+  kpis: DashKpi[];
+  graficos: DashGrafico[];
+  tabelas: DashTabela[];
+  destaques: string[];
+  recomendacoes: string[];
+  indisponiveis: string[];
+  abrir?: boolean;
 }

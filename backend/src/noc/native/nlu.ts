@@ -15,7 +15,7 @@ import type { Equipamento } from '../knowledge.js';
 
 export type Intent =
   | 'saudacao' | 'ajuda' | 'agradecimento'
-  | 'relatorio' | 'alarmes' | 'eventos'
+  | 'relatorio' | 'dashboard' | 'alarmes' | 'eventos'
   | 'equipamento' | 'conectados' | 'caminho' | 'impacto' | 'topologia' | 'abrir' | 'pesquisa' | 'base' | 'cadastrar'
   | 'onus' | 'opa_fila' | 'opa_resumo' | 'opa_protocolo'
   | 'os_ixc' | 'cliente' | 'ftth' | 'geral'
@@ -51,6 +51,8 @@ const RULES: Array<{ intent: Intent; peso?: number; padroes: RegExp[] }> = [
   { intent: 'saudacao', padroes: [/^(oi|ola|opa|bom dia|boa tarde|boa noite|e ai|eai|hey|fala)\b[\s!.,]*((oi|ola|bom dia|boa tarde|boa noite|tudo bem|td bem|beleza|ia noc|noc)[\s!.,?]*)*$/] },
   { intent: 'agradecimento', padroes: [/^(obrigad[oa]|valeu|vlw|show|perfeito|beleza|blz|ok|certo|entendi|otimo)\b[!. ]*$/] },
   { intent: 'ajuda', padroes: [/o que (voce|vc) (faz|sabe|consegue)/, /\bajuda\b/, /como (te )?us(o|ar)/, /quais (comandos|perguntas)/, /^menu$/] },
+  // Painel visual (KPIs, gráficos): vence "relatório" quando os dois aparecem.
+  { intent: 'dashboard', peso: 5, padroes: [/\bdash ?boards?\b/, /\bpainel (de |da |do )?(indicadores|kpis?|metricas|gerencial|operacional|executivo|visual|da rede|do noc|de alarmes|de atendimentos?|de o\.?s)\b/, /\b(kpis?|indicadores|metricas)\b/, /\bgraficos?\b/] },
   { intent: 'relatorio', peso: 2, padroes: [/relatorio/, /\bresumo (do|de|da|geral)/, /como (foi|esta|ta) (o dia|a semana|o mes|ontem|hoje|o plantao|a noite)/, /balanco/, /panorama/, /visao geral/] },
   { intent: 'eventos', padroes: [/(quais|que) hosts? (mais )?(cai|caiu|cairam|ficou|ficaram)/, /mais (cai|caiu|cairam|quedas|instav)/, /incidentes? (da|na|desta|dessa|do|no|nos|dos) (semana|mes|ultimos|periodo|ontem)/, /historico de (alarm|evento|queda|incidente)/, /(ranking|top) (de )?(hosts?|alarm|queda|evento)/, /eventos? (de|do|da|no|na) (ontem|semana|mes|periodo)/, /quantas quedas/] },
   { intent: 'alarmes', padroes: [/alarm/, /alerta/, /\bproblemas?\b/, /\bincidentes?\b/, /fora do ar/, /\bcaid[oa]s?\b/, /\bcaiu\b/, /\bquedas?\b/, /\bdown\b/, /\boffline\b/, /zabbix/, /o que (esta|ta) (acontecendo|pegando|errado)/, /tem (algo|alguma coisa) (errado|caido|fora)/, /sem (internet|conexao|sinal)/, /\bdesastres?\b/] },

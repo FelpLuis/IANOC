@@ -32,7 +32,9 @@ export type AssistantEvent =
   // Pedido para o navegador do operador abrir uma página (só http/https, em nova guia).
   | { type: 'open_url'; url: string; label: string }
   // Proposta de cadastro aguardando confirmação de um administrador (noc/acoes.ts).
-  | { type: 'pending_action'; acao: unknown };
+  | { type: 'pending_action'; acao: unknown }
+  // Painel visual (KPIs, gráficos e tabelas) do relatório — noc/dashboard.ts.
+  | { type: 'dashboard'; dashboard: unknown };
 
 export interface AssistantReply {
   text: string;

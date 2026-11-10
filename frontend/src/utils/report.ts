@@ -1,3 +1,5 @@
+import type { Dashboard } from '../types';
+
 /**
  * Exportar uma resposta do assistente como relatório: Markdown (.md) para arquivar
  * ou editar, e impressão/PDF a partir do HTML já renderizado na tela.
@@ -68,7 +70,7 @@ ${renderedHtml}
  * Documento com a identidade visual (logo, cores, rodapé) e o molde padrão, gerado no
  * servidor. A janela abre no clique (para o navegador não bloquear) e recebe o HTML depois.
  */
-export async function abrirDocumento(markdown: string) {
+export async function abrirDocumento(markdown: string, dashboard?: Dashboard) {
   const win = window.open('', '_blank');
   if (!win) {
     alert('O navegador bloqueou a janela do documento. Libere pop-ups para este site.');
@@ -80,7 +82,8 @@ export async function abrirDocumento(markdown: string) {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ markdown }),
+      // Com dashboard, os indicadores e o status vão para o topo do documento.
+      body: JSON.stringify(dashboard ? { markdown, kpis: dashboard.kpis, status: dashboard.status, periodo: `${dashboard.periodo} · ${dashboard.intervalo}` } : { markdown }),
     });
     const html = await r.text();
     if (!r.ok) throw new Error(html.slice(0, 200));

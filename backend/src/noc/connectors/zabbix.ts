@@ -219,6 +219,15 @@ export async function problemEventsReport(opts: {
   const topProblemas = Object.entries(count((e) => e.problema)).sort((a, b) => b[1] - a[1]).slice(0, top)
     .map(([problema, n]) => ({ problema, eventos: n }));
 
+  // Linha do tempo: por hora em até 2 dias, por dia acima disso (horário de São Paulo).
+  const porHora = till - from <= 2 * 86400;
+  const passo = porHora ? 3600 : 86400;
+  const chave = (s: number) => { const t = horaLocal(s * 1000); return porHora ? `${t.slice(0, 13)}h` : t.slice(0, 10); };
+  const linha = new Map<string, number>();
+  for (let s = from; s <= till; s += passo) linha.set(chave(s), 0);
+  linha.set(chave(till), linha.get(chave(till)) ?? 0);
+  for (const e of eventos) { const k = chave(e.inicio); linha.set(k, (linha.get(k) ?? 0) + 1); }
+
   return {
     periodo: { desde: iso(from), ate: iso(till) },
     instancias: ok.map((r) => r.instancia),
@@ -229,6 +238,7 @@ export async function problemEventsReport(opts: {
     hosts_mais_eventos: [...porHost.values()].sort((a, b) => b.eventos - a.eventos).slice(0, top),
     hosts_mais_tempo_com_problema: [...porHost.values()].sort((a, b) => b.minutos - a.minutos).slice(0, top),
     problemas_mais_frequentes: topProblemas,
+    linha_do_tempo: { passo: porHora ? 'hora' as const : 'dia' as const, pontos: [...linha.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([rotulo, eventos]) => ({ rotulo, eventos })) },
     eventos_mais_longos: [...eventos].sort((a, b) => b.minutos - a.minutos).slice(0, top)
       .map((e) => ({ ...e, inicio: iso(e.inicio), fim: e.fim ? iso(e.fim) : null })),
     ...(erros ? { erros } : {}),

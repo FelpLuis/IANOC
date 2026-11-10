@@ -100,6 +100,11 @@ class Turn {
     this.emit({ type: 'pending_action', acao });
   }
 
+  /** Painel visual do relatório (KPIs, gráficos e tabelas) para a interface desenhar. */
+  painel(dashboard: unknown) {
+    this.emit({ type: 'dashboard', dashboard });
+  }
+
   /** Pede ao navegador do operador para abrir uma página em nova guia. */
   open(url: string, label: string) {
     this.emit({ type: 'open_url', url, label });
@@ -206,20 +211,30 @@ async function eventos(t: Turn, q: Parsed): Promise<string> {
   ].join('\n\n');
 }
 
-async function relatorio(t: Turn, q: Parsed): Promise<string> {
+/** Relatório (texto completo) ou dashboard (painel visual em tela cheia), com os mesmos números. */
+async function relatorio(t: Turn, q: Parsed, comoDashboard = false): Promise<string> {
   const n = q.periodo.nome;
   const periodo = n === 'ontem' || n === 'semana' || n === 'mes' ? n : n === 'hoje' || n === 'agora' ? 'hoje' : 'personalizado';
   const fontes = [
-    /zabbix|rede|alarm|incident/.test(q.texto) && 'zabbix',
-    /\bixc\b|o\.? ?s\b|ordens?/.test(q.texto) && 'ixc',
-    /\bopa\b|atendiment/.test(q.texto) && 'opa',
+    /zabbix|rede|alarm|incident|backbone/.test(q.texto) && 'zabbix',
+    /\bixc\b|o\.? ?s\b|ordens?|tecnic/.test(q.texto) && 'ixc',
+    /\bopa\b|atendiment|suporte|fila/.test(q.texto) && 'opa',
   ].filter(Boolean) as string[];
-  const r = await t.call<{ markdown?: string }>('relatorio_noc', {
+  const r = await t.call<{ markdown?: string; dashboard?: { kpis: Array<{ rotulo: string; valor: string }>; status: { texto: string }; periodo: string; abrir?: boolean } }>('relatorio_noc', {
     periodo,
     ...(periodo === 'personalizado' ? { desde: q.periodo.from.toISOString(), ate: q.periodo.to.toISOString() } : {}),
     ...(fontes.length ? { fontes } : {}),
   });
-  return r.ok && r.data.markdown ? `${nia.aberturaRelatorio()}\n\n${r.data.markdown}` : nia.erro(`relatório: ${r.text}`);
+  if (!r.ok || !r.data.markdown) return nia.erro(`relatório: ${r.text}`);
+  const d = r.data.dashboard;
+  if (d) t.painel({ ...d, abrir: comoDashboard });
+  if (!comoDashboard || !d) return `${nia.aberturaRelatorio()}${d ? ' O dashboard visual está logo abaixo.' : ''}\n\n${r.data.markdown}`;
+  // Dashboard: fala curta com os indicadores; o painel abre em tela cheia. O texto completo fica para exportar.
+  const kpis = d.kpis.slice(0, 4).map((k) => `${k.rotulo.toLowerCase()}: ${k.valor}`).join('; ');
+  return [
+    `${nia.pick('dash', ['Dashboard projetado, Chefe.', 'Painel montado e sincronizado com os sistemas.', 'Indicadores renderizados.'])} Período: ${d.periodo}. Status geral: ${d.status.texto.toLowerCase()}${kpis ? ` — ${kpis}` : ''}.`,
+    '> Painel aberto em tela cheia. Use **Exportar** para salvar em HTML ou PDF com a identidade da UpDown.',
+  ].join('\n\n');
 }
 
 function vizinhoNome(k: Knowledge, id: string) {
@@ -736,7 +751,7 @@ const AJUDA = [
   nia.ajudaIntro(),
   '- **Alarmes agora** — "o que está com alarme alto?", "alarmes na OLT do Casqueiro"',
   '- **Histórico** — "quais hosts mais caíram na semana?", "incidentes de ontem"',
-  '- **Relatórios** — "relatório de hoje", "relatório da semana", "relatório do mês"',
+  '- **Relatórios e dashboards** — "relatório de hoje", "dashboard da semana", "painel de atendimentos de ontem" (painel visual com indicadores e gráficos, exportável em PDF)',
   '- **Topologia 3D** — "gere a topologia 3D da rede backbone", "mapa da rede"',
   '- **Perguntas gerais** — "quanto é 15% de 230?", "que horas são?", "quem inventou a fibra óptica?" (pesquiso na web e respondo)',
   '- **Base de conhecimento** — "o que diz o manual sobre troca de ONU?", "procure nos documentos sobre VLAN" (envie PDFs em Base e identidade)',
@@ -820,6 +835,7 @@ async function responder(t: Turn, q: Parsed, k: Knowledge): Promise<string> {
     case 'agradecimento': return nia.agradecimento();
     case 'ajuda': return AJUDA;
     case 'relatorio': return relatorio(t, q);
+    case 'dashboard': return relatorio(t, q, true);
     case 'alarmes': return on('zabbix') ? alarmes(t, q) : 'O Zabbix não está configurado neste servidor.';
     case 'eventos': return on('zabbix') ? eventos(t, q) : 'O Zabbix não está configurado neste servidor.';
     case 'equipamento': return equipamento(t, q, k);

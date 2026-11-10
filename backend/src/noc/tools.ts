@@ -394,7 +394,9 @@ export async function runTool(name: string, input: unknown): Promise<{ text: str
   try {
     // O tipo do schema é garantido pelo safeParse acima.
     const result = await (def.run as (i: unknown) => Promise<unknown>)(parsed.data);
-    return { text: toToolText(result), isError: false, data: result };
+    // O dashboard do relatório é só para a interface: não entra no texto que vai ao modelo.
+    const paraTexto = name === REPORT_TOOL && result && typeof result === 'object' ? { ...(result as object), dashboard: undefined } : result;
+    return { text: toToolText(paraTexto), isError: false, data: result };
   } catch (error) {
     return { text: error instanceof Error ? error.message : String(error), isError: true };
   }
