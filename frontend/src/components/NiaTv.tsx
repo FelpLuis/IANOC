@@ -208,8 +208,6 @@ function PalcoHolograma({ r, pensando }: { r?: Resultado; pensando?: Pensando | 
           </div>
         ) : (
           <div className="text-center">
-            <p className="font-display text-4xl font-bold uppercase tracking-[0.15em] text-white xl:text-5xl">Aguardando perguntas por voz</p>
-            <p className="mx-auto mt-4 max-w-3xl text-xl text-slate-300">Pergunte à NIA pelo microfone em qualquer computador ou celular. A resposta aparece aqui em 3D ou em dashboard.</p>
           </div>
         )}
       </div>
