@@ -1,0 +1,24 @@
+[Unit]
+Description=IA NOC - assistente virtual do NOC
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ianoc
+Group=ianoc
+WorkingDirectory=/opt/ianoc/current/backend
+EnvironmentFile=/etc/ianoc/ianoc.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=on-failure
+RestartSec=5
+
+# Endurecimento: só escreve no diretório de dados.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/ianoc
+
+[Install]
+WantedBy=multi-user.target

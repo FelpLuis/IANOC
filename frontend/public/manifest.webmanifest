@@ -1,0 +1,15 @@
+{
+  "name": "NIA — IA NOC UpDown",
+  "short_name": "NIA",
+  "description": "Assistente virtual do NOC da UpDown Internet: alarmes, relatórios, atendimentos e aparelhos, por texto ou voz.",
+  "lang": "pt-BR",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#030712",
+  "theme_color": "#030712",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

@@ -1,0 +1,12 @@
+[Unit]
+Description=IA NOC - restringe a porta do assistente aos IPs liberados
+After=network.target ufw.service netfilter-persistent.service firewalld.service
+Before=ianoc.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash /opt/ianoc/current/deploy/firewall.sh
+
+[Install]
+WantedBy=multi-user.target
