@@ -12,9 +12,38 @@ Seu assistente de IA pessoal que aprende com seus projetos locais.
 
 ## 🛰️ Assistente virtual do NOC
 
-Com um modelo de IA configurado (Claude, pago, ou uma opção gratuita: Ollama local, Gemini, Groq, OpenRouter), o chat vira o assistente do NOC da UpDown:
-ele consulta os ambientes do provedor em tempo real e conhece o backbone e a rede FTTH.
-Sem modelo, o chat continua com as respostas locais antigas (sem consultar a rede).
+O chat é o assistente do NOC da UpDown: consulta os ambientes do provedor em tempo real e
+conhece o backbone e a rede FTTH.
+
+**Motor nativo (padrão, `LLM_PROVIDER=nativo`).** O IA NOC entende e responde sozinho, sem
+modelo de linguagem externo, sem chave e sem limite de uso (`backend/src/noc/native/`):
+- `nlu.ts` reconhece a intenção (alarmes, histórico, relatório, equipamento, caminho, impacto,
+  ONUs, fila e atendimentos do Opa!, O.S. do IXC, cliente, caixa FTTH), os equipamentos da
+  topologia citados, o período ("ontem", "semana", "últimas 6 horas"), a severidade, o cliente
+  e o protocolo. Perguntas de seguimento ("e ontem?", "e o 6730?") herdam o assunto anterior.
+- `engine.ts` chama as mesmas ferramentas do assistente e monta a resposta com os números
+  exatos: um resumo falado primeiro, depois as tabelas. Resposta em menos de 1 s na maioria.
+- `analysis.ts` escreve a análise dos relatórios (situação, pontos de atenção e
+  recomendações) por regras sobre os números — nada é inventado.
+- Para ensinar uma frase nova, acrescente um padrão na intenção certa em `RULES` (nlu.ts).
+- **Manuais e pesquisa na web** (`web/research.ts`, `web/manual.ts`): busca só por API oficial
+  (`TAVILY_API_KEY`, `BRAVE_API_KEY`) ou SearXNG próprio (`SEARXNG_URL`), mais a Wikipédia; sem
+  busca configurada, lê os links que o operador passar ("gere um manual a partir de https://…").
+  Monta resumo, pré-requisitos, passo a passo, dicas e fontes citadas, por extração (não inventa
+  texto). Não raspa buscador nem contorna bloqueio anti-robô; identifica-se como NIA.
+- **Navegador:** "abre o Zabbix", "abre o mapa da CTO 366", "toca X no Spotify" abrem páginas em nova
+  guia (só http/https). Não há controle da máquina.
+- **Administrador master:** `IANOC_ADMIN_USER`/`IANOC_ADMIN_PASSWORD` criam o usuário local com troca
+  de senha obrigatória no primeiro acesso; a senha fica só como hash em `usuarios.json`.
+- **Topologia 3D** ("gere a topologia 3D da rede", "mapa da rede"): `topology.ts` junta o backbone
+  cadastrado (NOC ou sementes) com os hosts de infraestrutura do Zabbix (grupos Links/OLTs e
+  prefixos 18400/18401/18450) e o estado dos alarmes. Hosts sem enlace cadastrado ligam-se ao
+  equipamento do mesmo modelo/local ou ao site pelo nome (linha tracejada, "inferido"). A tela
+  3D abre sozinha: andares por função, tráfego animado nos enlaces, clique para a ficha.
+
+Opcionalmente, um modelo de linguagem (Claude, Groq, Gemini, OpenRouter ou Ollama local) pode
+responder perguntas livres; veja "Configurar". Mesmo com modelo, os relatórios usam os números
+do servidor e, se o modelo falhar, a análise nativa assume.
 
 **Somente leitura.** Nenhuma ferramenta altera estado: o Zabbix aceita só métodos `.get`,
 o GenieACS e o Opa! Suite só GET, o IXC só `listar`, e o NOC é acessado por um usuário de serviço.
@@ -32,6 +61,13 @@ e onde fazer, e um humano executa.
 **Relatórios:** botões prontos (hoje, ontem, semana, mês, O.S., atendimentos) ou peça em texto/voz.
 Cada resposta pode ser baixada em `.md` ou impressa/salva em PDF pelos ícones abaixo dela.
 
+**Voz das respostas:** `TTS_PROVIDER=kokoro` gera a fala no próprio servidor (Kokoro-82M + eSpeak NG em
+pt-BR, voz `pf_dora`), sem internet nem créditos; o modelo (~325 MB) é baixado uma vez para
+`KOKORO_CACHE_DIR`. Clonagem da voz própria: veja [docs/gravacao-voz-NIA.md](docs/gravacao-voz-NIA.md).
+Padrão sem configurar: `TTS_PROVIDER=edge` (voz neural Francisca). Com `TTS_PROVIDER=fish`,
+`FISH_API_KEY` e `FISH_VOICE_ID`, usa um modelo de voz da Fish Audio (escolha uma voz original ou
+licenciada); se a Fish falhar, volta para a Francisca.
+
 **Voz:** botão de microfone no chat (Chrome/Edge reconhecem fala em pt-BR) e leitura das
 respostas em voz alta (botão de alto-falante liga a leitura automática). Pergunta feita por
 voz é respondida com um resumo falado primeiro. O navegador só libera o microfone em
@@ -44,12 +80,13 @@ Cada conector liga sozinho quando as variáveis dele estão preenchidas.
 
 ### Configurar
 
-1. Escolha o modelo em `backend/.env` (`LLM_PROVIDER`):
+1. Escolha quem responde em `backend/.env` (`LLM_PROVIDER`):
+   - **Nativo (padrão):** `LLM_PROVIDER=nativo`. Nada a instalar, sem chave, nada sai para IA externa.
    - **Grátis e local:** instale o [Ollama](https://ollama.com), rode `ollama pull qwen3:8b` e defina
      `LLM_PROVIDER=ollama` e `LLM_MODEL=qwen3:8b`. Nada sai da rede; sem placa de vídeo cada resposta leva minutos.
    - **Grátis na nuvem:** `LLM_PROVIDER=gemini` (ou `groq`/`openrouter`), `LLM_MODEL` e `LLM_API_KEY`
      do provedor. Rápido, mas com limite de uso, e na cota gratuita os dados podem ser usados pelo provedor.
-     Em uso: **Groq** com `openai/gpt-oss-120b` (8 mil tokens/minuto na cota grátis). Para caber, o
+     Opção testada: **Groq** com `openai/gpt-oss-120b` (8 mil tokens/minuto na cota grátis). Para caber, o
      modo compacto é automático no Groq (inventário e documentos saem do prompt e ficam nas
      ferramentas; descrições encurtadas; resposta limitada ao que sobra do minuto) e, ao bater o
      limite, o assistente espera o tempo pedido e tenta de novo — perguntas com várias consultas
@@ -87,6 +124,14 @@ Depois: `sudo nano /etc/ianoc/ianoc.env` e `sudo systemctl restart ianoc`.
 Logs e registro de quem perguntou o quê: `journalctl -u ianoc -f`.
 Os 3 últimos releases ficam em `/opt/ianoc/releases`; rollback é apontar
 `/opt/ianoc/current` para o anterior e reiniciar.
+
+**Servidor sem SSH:** `bash deploy/deploy.sh --offline` gera
+`release/ianoc-instalar-<data>.sh`, um arquivo único com o pacote, as dependências
+do backend e as chaves preenchidas no `backend/.env` (Groq, Zabbix, IXC, Opa!, voz).
+Leve o arquivo ao servidor e rode `sudo bash ianoc-instalar-<data>.sh` no console.
+As chaves entram em `/etc/ianoc/ianoc.env` sem apagar as demais (fica uma cópia
+`.bak-<data>`). O arquivo tem credenciais: apague-o depois. A pasta `release/`
+não vai para o git.
 
 ## 📁 Estrutura do Projeto
 
