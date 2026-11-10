@@ -145,6 +145,11 @@ export async function buildReport(opts: { periodo: Periodo; desde?: string; ate?
       md.push('### Por setor', fromCounts(a.por_setor, 'Setor'));
       md.push('### Por canal', fromCounts(a.por_canal, 'Canal'));
       if (Object.keys(a.por_dia).length > 1) md.push('### Por dia', fromCounts(a.por_dia, 'Dia'));
+      const sat = a.satisfacao;
+      if (sat?.avaliacoes) {
+        md.push(`### Satisfação dos clientes`, `CSAT **${sat.csat_pct}%** (notas 4 e 5) com **${n(sat.avaliacoes)}** avaliações, nota média **${sat.media}** de 5; taxa de resposta da pesquisa ${sat.taxa_resposta_pct ?? '—'}% dos finalizados.`);
+        digest.push(`Satisfação Opa!: CSAT ${sat.csat_pct}% em ${sat.avaliacoes} avaliações, média ${sat.media}/5.`);
+      }
       md.push('### Por atendente', table(['Atendente', 'Atendimentos', 'Finalizados', 'Média'],
         a.por_atendente.map((r) => [r.atendente, r.atendimentos, r.finalizados, r.media_min === null ? '—' : dur(r.media_min)])));
       if (a.em_aberto.mais_antigos.length) {

@@ -79,6 +79,7 @@ interface OpaRel {
   por_status: Record<string, number>; por_setor: Record<string, number>; por_canal: Record<string, number>; por_dia: Record<string, number>;
   por_atendente: Array<{ atendente: string; atendimentos: number; finalizados: number; media_min: number | null }>;
   duracao_finalizados_min?: { media: number; mediana: number; p90: number } | null;
+  satisfacao?: { avaliacoes: number; media: number | null; csat_pct: number | null };
 }
 
 export function montarDashboard(o: {
@@ -156,6 +157,10 @@ export function montarDashboard(o: {
     gravidade = Math.max(gravidade, aberto >= 10 ? 1 : 0);
     kpis.push({ id: 'atend', rotulo: 'Atendimentos', valor: n(o.opa.total), detalhe: `${n(aberto)} em aberto`, tom: aberto >= 10 ? 'atencao' : 'marca', icone: 'headset' });
     if (d) kpis.push({ id: 'duracao', rotulo: 'Duração mediana', valor: dur(d.mediana), detalhe: `90% em até ${dur(d.p90)}`, tom: 'info', icone: 'clock' });
+    const sat = o.opa.satisfacao;
+    if (sat?.avaliacoes && sat.csat_pct !== null) {
+      kpis.push({ id: 'csat', rotulo: 'Satisfação (CSAT)', valor: `${sat.csat_pct.toLocaleString('pt-BR')}%`, detalhe: `${n(sat.avaliacoes)} avaliações · média ${sat.media?.toLocaleString('pt-BR')}/5`, tom: sat.csat_pct >= 85 ? 'ok' : sat.csat_pct >= 70 ? 'atencao' : 'critico', icone: 'activity' });
+    }
     const dias = Object.entries(o.opa.por_dia ?? {}).sort((a, b) => a[0].localeCompare(b[0]));
     if (dias.length > 1) graficos.push({ id: 'opa-dia', tipo: 'linha', grupo: 'Atendimento', largura: 2, titulo: 'Atendimentos por dia', series: dias.map(([k, v]) => ({ rotulo: `${k.slice(8, 10)}/${k.slice(5, 7)}`, valor: v })) });
     const setor = doMapa(o.opa.por_setor, 6, true);
@@ -265,6 +270,52 @@ export function dashboardDeAlarmes(o: {
       grupo: 'Rede', titulo: `Alarmes (${n(ps.length)})`, colunas: ['Severidade', 'Host', 'Problema', 'Desde', 'Rec.'],
       linhas: ord.slice(0, 15).map((p) => [p.severidade, corta(p.host, 40), corta(p.problema, 90), p.desde ?? '—', p.reconhecido ? 'sim' : 'não']),
       tons: ord.slice(0, 15).map((p) => (p.severidade === 'desastre' ? 'critico' : 'atencao')),
+    }] : [],
+    destaques: [], recomendacoes: [], indisponiveis: [],
+  };
+}
+
+/** Dashboard da pesquisa de satisfação do Opa! (CSAT, nota média, distribuição, setores e atendentes). */
+export function dashboardDeSatisfacao(o: {
+  s: {
+    avaliacoes: number; media: number | null; csat_pct: number | null; distribuicao: Record<string, number>;
+    finalizados: number; taxa_resposta_pct: number | null;
+    por_setor: Array<{ nome: string; avaliacoes: number; media: number | null; csat_pct: number | null }>;
+    por_atendente: Array<{ nome: string; avaliacoes: number; media: number | null; csat_pct: number | null }>;
+  };
+  periodo: string; onde: string;
+}): Dashboard {
+  const { s } = o;
+  const csat = s.csat_pct ?? 0;
+  const tom: Tom = csat >= 85 ? 'ok' : csat >= 70 ? 'atencao' : 'critico';
+  const v1 = (x: number | null) => (x === null ? '—' : x.toLocaleString('pt-BR', { maximumFractionDigits: 1 }));
+  const CORES_NOTA: Record<string, string> = { '5': '#38e8c6', '4': '#12baea', '3': '#ffc53d', '2': '#ff7a2f', '1': '#ff2d6f' };
+  const graficos: Grafico[] = [
+    { id: 'sat-dist', tipo: 'rosca', grupo: 'Satisfação', titulo: 'Notas dos clientes', subtitulo: 'escala de 1 a 5',
+      series: ['5', '4', '3', '2', '1'].map((k) => ({ rotulo: `nota ${k}`, valor: s.distribuicao[k] ?? 0, cor: CORES_NOTA[k] })).filter((x) => x.valor) },
+  ];
+  const setores = s.por_setor.filter((g) => g.csat_pct !== null);
+  if (setores.length) graficos.push({ id: 'sat-setor', tipo: 'barras_h', grupo: 'Satisfação', titulo: 'CSAT por setor (%)', series: setores.slice(0, 8).map((g) => ({ rotulo: `${corta(g.nome, 34)} (${g.avaliacoes})`, valor: g.csat_pct as number })) });
+  const atend = s.por_atendente.filter((g) => g.media !== null);
+  if (atend.length) graficos.push({ id: 'sat-atend', tipo: 'barras', grupo: 'Satisfação', titulo: 'Nota média por atendente', series: atend.slice(0, 10).map((g) => ({ rotulo: corta(g.nome, 16), valor: g.media as number })) });
+  return {
+    id: randomUUID().slice(0, 8),
+    titulo: 'Satisfação dos clientes',
+    periodo: `${o.periodo}${o.onde}`,
+    intervalo: 'pesquisa de satisfação do Opa!',
+    geradoEm: horaLocal(new Date()).slice(0, 16),
+    fontes: ['Opa! Suite'],
+    status: { tom, texto: csat >= 85 ? 'Excelente' : csat >= 70 ? 'Atenção' : 'Crítico' },
+    kpis: [
+      { id: 'sat-csat', rotulo: 'CSAT (notas 4 e 5)', valor: `${v1(s.csat_pct)}%`, detalhe: `${n(s.avaliacoes)} avaliações`, tom, icone: 'activity' },
+      { id: 'sat-media', rotulo: 'Nota média', valor: `${v1(s.media)} / 5`, detalhe: 'escala Likert', tom: (s.media ?? 0) >= 4 ? 'ok' : 'atencao', icone: 'timer' },
+      { id: 'sat-resp', rotulo: 'Taxa de resposta', valor: `${v1(s.taxa_resposta_pct)}%`, detalhe: `de ${n(s.finalizados)} finalizados`, tom: 'info', icone: 'headset' },
+      { id: 'sat-ruins', rotulo: 'Notas 1 e 2', valor: n((s.distribuicao['1'] ?? 0) + (s.distribuicao['2'] ?? 0)), detalhe: 'clientes insatisfeitos', tom: (s.distribuicao['1'] ?? 0) + (s.distribuicao['2'] ?? 0) ? 'critico' : 'ok', icone: 'siren' },
+    ],
+    graficos,
+    tabelas: s.por_atendente.length ? [{
+      grupo: 'Satisfação', titulo: 'Avaliações por atendente', colunas: ['Atendente', 'Avaliações', 'Nota média', 'CSAT'],
+      linhas: s.por_atendente.map((g) => [g.nome, String(g.avaliacoes), v1(g.media), g.csat_pct === null ? '—' : `${v1(g.csat_pct)}%`]),
     }] : [],
     destaques: [], recomendacoes: [], indisponiveis: [],
   };

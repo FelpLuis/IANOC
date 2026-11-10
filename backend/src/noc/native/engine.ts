@@ -27,9 +27,18 @@ import { horaLocal } from '../http.js';
 import { dur } from './analysis.js';
 import { parse, norm, type Intent, type Parsed, type Periodo } from './nlu.js';
 import * as nia from './persona.js';
-import { dashboardDeAlarmes } from '../dashboard.js';
+import { dashboardDeAlarmes, dashboardDeSatisfacao } from '../dashboard.js';
 import { calcular, dataHora, llmGeral, resetGeral, responderGeral, responderTecnico } from './geral.js';
 import { dominioTecnico, pedidoDeCodigo, perguntaTecnica } from './especialidades.js';
+
+// Indicadores que os conectores atuais não trazem: [padrão, nome, o que fazer].
+const METRICA_INDISPONIVEL: Array<[RegExp, string, string]> = [
+  [/\bnps\b|net promoter/, 'o NPS (escala de 0 a 10)', 'A pesquisa do Opa! é de 1 a 5; posso calcular o CSAT dela — pergunte "qual o índice de satisfação de hoje?".'],
+  [/\bchurn\b|taxa de cancelamento|cancelamentos? de (contrato|cliente)/, 'a taxa de cancelamento (churn)', 'Ela depende do módulo de contratos/financeiro do IXC, que ainda não está ligado à NIA.'],
+  [/\b(faturamento|receita|inadimplen\w*|ticket medio|mensalidades?|boletos?)\b/, 'dados financeiros (faturamento, inadimplência, boletos)', 'O acesso da NIA ao IXC é só de ordens de serviço e clientes, sem o financeiro.'],
+  [/\b(tempo (medio )?de espera|tme|primeira resposta|tempo ate (o )?atendimento)\b/, 'o tempo de espera até o primeiro atendimento', 'O Opa! entrega abertura e fim do atendimento: posso dar a duração total (média, mediana e 90%) — pergunte "duração dos atendimentos de hoje".'],
+  [/\bsla\b/, 'o cumprimento de SLA', 'Não há metas de SLA cadastradas na NIA; posso mostrar duração de atendimentos (Opa!) e tempo de resolução das O.S. (IXC).'],
+];
 
 // Intenções que consultam os sistemas do NOC: pergunta de "como funciona" não as desvia.
 const CONSULTA_SISTEMAS = ['alarmes', 'eventos', 'relatorio', 'dashboard', 'opa_fila', 'opa_resumo', 'opa_protocolo', 'os_ixc', 'cliente', 'cadastrar', 'abrir', 'topologia', 'conectados', 'caminho', 'impacto', 'onus', 'ftth', 'base', 'equipamento'];
@@ -641,6 +650,40 @@ interface OpaResumo {
   por_atendente: Array<{ atendente: string; atendimentos: number; finalizados: number; media_min: number | null }>;
   duracao_finalizados_min?: { media: number; mediana: number; p90: number } | null;
   em_aberto: { total: number; por_status: Record<string, number>; mais_antigos: Array<{ protocolo?: unknown; status?: string; setor?: string; atendente?: string; aberto_ha_min: number }> };
+  satisfacao?: Satisfacao;
+}
+export interface NotaGrupo { nome: string; avaliacoes: number; media: number | null; csat_pct: number | null }
+export interface Satisfacao {
+  avaliacoes: number; media: number | null; csat_pct: number | null; distribuicao: Record<string, number>;
+  finalizados: number; taxa_resposta_pct: number | null; por_setor: NotaGrupo[]; por_atendente: NotaGrupo[];
+}
+
+const num1 = (v: number | null | undefined) => (v === null || v === undefined ? '—' : v.toLocaleString('pt-BR', { maximumFractionDigits: 1 }));
+
+/** "Qual o índice de satisfação de hoje?": CSAT, nota média e distribuição da pesquisa do Opa!. */
+async function opaSatisfacao(t: Turn, q: Parsed): Promise<string> {
+  const r = await t.call<OpaResumo>('opa_relatorio_atendimentos', { desde: dataSP(q.periodo.from), ate: dataSP(q.periodo.to), top: 10, ...(q.setor ? { setor: q.setor } : {}) });
+  if (!r.ok) return `Não consegui consultar o Opa!: ${r.text}`;
+  const s = r.data.satisfacao;
+  const onde = q.setor ? ` no setor ${q.setor}` : '';
+  if (!s) return 'O Opa! não devolveu os dados da pesquisa de satisfação nesta consulta.';
+  if (!s.avaliacoes) return `${quando(q.periodo)} nenhum cliente respondeu a pesquisa de satisfação no Opa!${onde} (${plural(s.finalizados, 'atendimento finalizado', 'atendimentos finalizados')}). Sem avaliações, não há índice para calcular ainda.`;
+  t.painel(dashboardDeSatisfacao({ s, periodo: q.periodo.rotulo, onde }));
+  const baixa = s.avaliacoes < 30;
+  const presente = ['hoje', 'agora', 'mes', 'semana', 'horas', 'dias'].includes(q.periodo.nome);
+  const fala = `${quando(q.periodo)} o índice de satisfação (CSAT) do Opa!${onde} ${presente ? 'está em' : 'foi de'} ${num1(s.csat_pct)}%: `
+    + `${plural(s.avaliacoes, 'cliente avaliou', 'clientes avaliaram')} o atendimento, com nota média ${num1(s.media)} de 5.`
+    + ` A taxa de resposta da pesquisa foi de ${num1(s.taxa_resposta_pct)}% dos ${plural(s.finalizados, 'atendimento finalizado', 'atendimentos finalizados')}.`
+    + (baixa ? ' Atenção: com poucas avaliações o índice ainda oscila bastante.' : '');
+  const grupo = (xs: NotaGrupo[], titulo: string) => (xs.length ? table([titulo, 'Avaliações', 'Nota média', 'CSAT'], xs.map((g) => [g.nome, g.avaliacoes, num1(g.media), g.csat_pct === null ? '—' : `${num1(g.csat_pct)}%`])) : '');
+  return [
+    fala,
+    '### Distribuição das notas',
+    table(['Nota', 'Avaliações'], ['5', '4', '3', '2', '1'].map((n) => [`${n} ${'★'.repeat(Number(n))}`, s.distribuicao[n] ?? 0])),
+    s.por_setor.length ? '### Por setor' : '', grupo(s.por_setor, 'Setor'),
+    s.por_atendente.length ? '### Por atendente' : '', grupo(s.por_atendente, 'Atendente'),
+    '> CSAT = percentual de notas 4 e 5 entre os clientes que responderam a pesquisa (escala de 1 a 5).',
+  ].filter(Boolean).join('\n\n');
 }
 
 async function opaResumo(t: Turn, q: Parsed, soFila: boolean): Promise<string> {
@@ -789,6 +832,18 @@ export async function askNative(sessionId: string, message: string, onEvent: Emi
   const direta = calcular(message) ?? dataHora(message);
   if (direta) return { text: direta, model: NATIVE_LABEL, toolsUsed: [], usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
 
+  // Indicador que nenhum sistema conectado fornece: diz isso em vez de responder outra coisa
+  // com confiança (pedir NPS e receber o resumo de atendimentos). Vem antes da herança de
+  // contexto, para "e o NPS?" não virar a resposta anterior. "O que é NPS?" continua explicação.
+  const pedidoIndisponivel = METRICA_INDISPONIVEL.find(([re]) => re.test(q.texto));
+  if (pedidoIndisponivel && !['pesquisa', 'geral', 'ajuda'].includes(q.intent) && !pedidoDeCodigo(q.texto, q.original) && !perguntaTecnica(q.texto)) {
+    const [, nome, sugestao] = pedidoIndisponivel;
+    return {
+      text: `Não tenho ${nome} nos sistemas conectados, Chefe — prefiro dizer isso a te passar um número errado. ${sugestao}\n\nO que consigo medir hoje: alarmes e incidentes (Zabbix), ordens de serviço e tempo de resolução (IXC), atendimentos, fila, duração e **satisfação dos clientes (CSAT)** do Opa!.`,
+      model: NATIVE_LABEL, toolsUsed: [], usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    };
+  }
+
   // Seguimento: "e ontem?", "e o 6730?", "e na semana?" herdam a intenção anterior.
   const curta = q.texto.split(' ').length <= 6 && /^(e|e o|e a|e no|e na|e do|e da|agora|e agora|mesma coisa|e para|e pro)\b/.test(q.texto);
   // Só herda em continuação curta ("e ontem?"); pergunta solta e desconhecida não herda o assunto.
@@ -833,6 +888,7 @@ export async function askNative(sessionId: string, message: string, onEvent: Emi
   if (area && (codigo || ['desconhecido', 'geral', 'pesquisa', 'tecnico'].includes(q.intent)
     || (perguntaTecnica(q.texto) && (!CONSULTA_SISTEMAS.includes(q.intent) || !consultaReal)))) q.intent = 'tecnico';
 
+
   const t = new Turn(onEvent);
   t.conversa = sessionId;
   let text: string;
@@ -869,6 +925,7 @@ async function responder(t: Turn, q: Parsed, k: Knowledge): Promise<string> {
     case 'onus': return onus(t, q);
     case 'opa_fila': return on('opa') ? opaResumo(t, q, true) : 'O Opa! Suite não está configurado neste servidor.';
     case 'opa_resumo': return on('opa') ? opaResumo(t, q, false) : 'O Opa! Suite não está configurado neste servidor.';
+    case 'opa_satisfacao': return on('opa') ? opaSatisfacao(t, q) : 'O Opa! Suite não está configurado neste servidor.';
     case 'opa_protocolo': return on('opa') ? opaProtocolo(t, q) : 'O Opa! Suite não está configurado neste servidor.';
     case 'os_ixc': return on('ixc') ? osIxc(t, q) : 'O IXC não está configurado neste servidor.';
     case 'cliente': return cliente(t, q);

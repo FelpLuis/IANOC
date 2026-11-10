@@ -17,7 +17,7 @@ export type Intent =
   | 'saudacao' | 'ajuda' | 'agradecimento'
   | 'relatorio' | 'dashboard' | 'alarmes' | 'eventos'
   | 'equipamento' | 'conectados' | 'caminho' | 'impacto' | 'topologia' | 'abrir' | 'pesquisa' | 'base' | 'cadastrar'
-  | 'onus' | 'opa_fila' | 'opa_resumo' | 'opa_protocolo'
+  | 'onus' | 'opa_fila' | 'opa_resumo' | 'opa_protocolo' | 'opa_satisfacao'
   | 'os_ixc' | 'cliente' | 'ftth' | 'geral' | 'tecnico'
   | 'desconhecido';
 
@@ -73,6 +73,8 @@ const RULES: Array<{ intent: Intent; peso?: number; padroes: RegExp[] }> = [
   { intent: 'onus', padroes: [/\bonus?\b/, /\bonts?\b/, /\bsinal\b/, /\bdbm\b/, /atenuac/, /potencia (optica|de sinal)/, /\blos\b/, /dying ?gasp/, /\bpon\b/] },
   { intent: 'opa_protocolo', peso: 3, padroes: [/\bupd\d{6,}/, /protocolo\s*\d{5,}/] },
   { intent: 'opa_fila', peso: 1.5, padroes: [/\bfila\b/, /aguardando/, /esperando/, /na espera/, /em atendimento agora/, /quantos? (clientes? )?(aguard|esperand)/] },
+  // Satisfação dos clientes (pesquisa Likert do Opa!): vence o resumo genérico de atendimentos.
+  { intent: 'opa_satisfacao', peso: 4, padroes: [/satisfa/, /\bcsat\b/, /\bavaliac(ao|oes)\b/, /\bavaliad[oa]s?\b/, /\bnotas? (d[oae]s? )?(clientes?|atendimentos?|pesquisa)/, /\bpesquisa de satisfa/, /\b(clientes?) (satisfeit|insatisfeit)/] },
   { intent: 'opa_resumo', padroes: [/atendimentos?/, /\bopa\b/, /\bchats?\b/, /whatsapp/, /\bsuporte\b/, /\batendentes?\b/] },
   // "os" minúsculo é artigo ("quais são os aparelhos"): a sigla O.S. é checada no texto original, em maiúsculas (ver parse).
   { intent: 'os_ixc', padroes: [/ordem de servico/, /ordens de servico/, /\bchamados?\b/, /visitas? tecnica/, /\btecnicos?\b/, /\bixc\b/, /\bagendad/] },

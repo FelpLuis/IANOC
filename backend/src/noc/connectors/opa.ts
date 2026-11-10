@@ -259,7 +259,38 @@ export async function opaAtendimentosResumo(f: AtendimentoFiltro, top = 15) {
 
   const agora = Date.now();
   const abertos = regs.filter((a) => a.status !== 'F');
+
+  // Pesquisa de satisfação: cada atendimento avaliado traz evaluations[] com a nota Likert
+  // (1 a 5) em likert.rating. CSAT = % de notas 4 e 5 entre as avaliações respondidas.
+  const notaDe = (a: Rec): number | undefined => {
+    const ev = Array.isArray(a.evaluations) ? (a.evaluations as Rec[]) : [];
+    const notas = ev.map((e) => Number((e?.likert as Rec | undefined)?.rating)).filter((n) => Number.isFinite(n) && n >= 1 && n <= 5);
+    return notas.length ? notas[notas.length - 1] : undefined; // a mais recente vale
+  };
+  const avaliados = regs.map((a) => ({ a, nota: notaDe(a) })).filter((x): x is { a: Rec; nota: number } => x.nota !== undefined);
+  const resumoNotas = (xs: Array<{ nota: number }>) => ({
+    avaliacoes: xs.length,
+    media: xs.length ? Math.round((xs.reduce((s, x) => s + x.nota, 0) / xs.length) * 100) / 100 : null,
+    csat_pct: xs.length ? Math.round((xs.filter((x) => x.nota >= 4).length / xs.length) * 1000) / 10 : null,
+  });
+  const agrupaNotas = (chave: (a: Rec) => string) => {
+    const g = new Map<string, Array<{ nota: number }>>();
+    for (const x of avaliados) { const k = chave(x.a); g.set(k, [...(g.get(k) ?? []), x]); }
+    return [...g.entries()].map(([nome, xs]) => ({ nome, ...resumoNotas(xs) })).sort((a, b) => b.avaliacoes - a.avaliacoes).slice(0, top);
+  };
+  const finalizados = regs.filter((a) => a.status === 'F').length;
+  const satisfacao = {
+    escala: '1 a 5 (Likert); CSAT = % de notas 4 e 5',
+    ...resumoNotas(avaliados),
+    distribuicao: Object.fromEntries([1, 2, 3, 4, 5].map((n) => [String(n), avaliados.filter((x) => x.nota === n).length])),
+    finalizados,
+    taxa_resposta_pct: finalizados ? Math.round((avaliados.length / finalizados) * 1000) / 10 : null,
+    por_setor: agrupaNotas((a) => setorNome(a.setor)),
+    por_atendente: agrupaNotas((a) => atendenteNome(a.id_atendente)),
+  };
+
   return {
+    satisfacao,
     filtro_api: filter,
     total: regs.length,
     ...(lidos.length >= 10000 ? { aviso: 'atingiu 10000 atendimentos; o período tem mais. Reduza o intervalo.' } : {}),
