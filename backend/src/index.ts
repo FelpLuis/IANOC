@@ -15,7 +15,7 @@ import { llmConfigured, llmLabel, resetConversation } from './noc/assistant.js';
 import { availableTools, connectorStatus } from './noc/tools.js';
 import { getKnowledge } from './noc/knowledge.js';
 import { nocConfig } from './noc/config.js';
-import { speakToMp3, ttsEnabled, ttsVoiceLabel } from './noc/tts.js';
+import { speakToMp3, ttsEnabled, ttsVoiceLabel, FalaCancelada } from './noc/tts.js';
 import { warmKokoro } from './noc/kokoro.js';
 import multer from 'multer';
 import { adicionarArquivo as kbAdicionar, caminhoArquivo as kbCaminho, listar as kbListar, obter as kbObter, remover as kbRemover, type KbTipo } from './noc/kb.js';
@@ -153,12 +153,19 @@ app.post('/api/voice/speak', express.json({ limit: '16kb' }), async (req, res) =
   if (!ttsEnabled()) return res.status(501).json({ error: 'Voz do servidor desligada (TTS_PROVIDER=browser).' });
   const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
   if (!text) return res.status(400).json({ error: 'Texto vazio.' });
+  // O navegador cancela o pedido quando para de falar (nova pergunta, recarregou a página):
+  // se ainda estiver na fila, a síntese é pulada.
+  let abandonado = false;
+  res.on('close', () => { if (!res.writableEnded) abandonado = true; });
   try {
-    const audio = await speakToMp3(text);
+    const audio = await speakToMp3(text, () => abandonado);
+    if (abandonado) return;
     // Kokoro devolve WAV; Fish e Microsoft, MP3.
     const tipo = audio.subarray(0, 4).toString('ascii') === 'RIFF' ? 'audio/wav' : 'audio/mpeg';
     res.set({ 'Content-Type': tipo, 'Cache-Control': 'no-store' }).send(audio);
   } catch (error) {
+    if (error instanceof FalaCancelada || abandonado) return;
+    console.warn('[voz] síntese falhou:', error instanceof Error ? error.message : error);
     res.status(502).json({ error: `Voz falhou: ${error instanceof Error ? error.message : String(error)}` });
   }
 });

@@ -87,13 +87,28 @@ const PRONUNCIA: Array<[RegExp, string]> = [
 ];
 export const pronuncia = (s: string) => PRONUNCIA.reduce((acc, [re, fala]) => acc.replace(re, fala), s);
 
-/** MP3 da frase. Uma síntese por vez na mesma conexão; tenta reconectar uma vez. */
-export function speakToMp3(raw: string): Promise<Buffer> {
+// Mesma frase pedida ao mesmo tempo (chat e NIA TV, ou duas TVs): uma síntese só para todos.
+// `desistiu` guarda, de cada interessado, se ele abandonou o pedido.
+const emAndamento = new Map<string, { job: Promise<Buffer>; desistiu: Array<() => boolean> }>();
+
+/** Pedido abandonado (o navegador parou de falar ou recarregou) enquanto esperava na fila. */
+export class FalaCancelada extends Error {}
+
+/**
+ * Áudio da frase (WAV do Kokoro ou MP3). Uma síntese por vez (a CPU é uma só); pedido que o
+ * navegador abandonou enquanto esperava na fila é descartado sem gastar CPU.
+ */
+export function speakToMp3(raw: string, cancelado: () => boolean = () => false): Promise<Buffer> {
   const text = pronuncia(raw.replace(/\s+/g, ' ').trim().slice(0, 1200));
   const hit = cache.get(text);
   if (hit) return Promise.resolve(hit);
+  const junto = emAndamento.get(text);
+  if (junto) { junto.desistiu.push(cancelado); return junto.job; }
+  const desistiu = [cancelado];
 
   const run = async () => {
+    // Só descarta se todos que esperavam esta frase desistiram.
+    if (desistiu.every((d) => d())) throw new FalaCancelada('pedido de voz abandonado');
     let audio: Buffer | undefined;
     if (kokoroEnabled()) {
       try { audio = await kokoroWav(text); } catch (e) { console.warn('[voz] Kokoro falhou, usando a voz da Microsoft:', e instanceof Error ? e.message : e); }
@@ -116,7 +131,8 @@ export function speakToMp3(raw: string): Promise<Buffer> {
     }
     return audio;
   };
-  const job = queue.then(run, run);
+  const job = queue.then(run, run).finally(() => emAndamento.delete(text));
+  emAndamento.set(text, { job, desistiu });
   queue = job.catch(() => undefined);
   return job;
 }

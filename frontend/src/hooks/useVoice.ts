@@ -148,14 +148,25 @@ export function resumoFalado(markdown: string): string {
  * seguintes são longas (várias frases), para a entonação seguir natural — sintetizar
  * frase por frase soa robótico.
  */
+/**
+ * Divide a fala em trechos (o primeiro menor, para começar a falar logo). Só corta em pontuação
+ * seguida de espaço — "1.161" e "10:30" ficam inteiros — e frase longa demais é dividida nas vírgulas.
+ */
 function chunks(text: string, first: number, rest: number): string[] {
-  const parts = text.match(/[^.!?;]+[.!?;]*/g) ?? [text];
+  const frases = text.split(/(?<=[.!?;:])\s+/).flatMap((f) => {
+    if (f.length <= rest) return [f];
+    const partes: string[] = [];
+    let atual = '';
+    for (const p of f.split(/(?<=,)\s+/)) { if (atual && `${atual} ${p}`.length > rest) { partes.push(atual); atual = ''; } atual = atual ? `${atual} ${p}` : p; }
+    if (atual) partes.push(atual);
+    return partes;
+  });
   const out: string[] = [];
   let cur = '';
-  for (const p of parts) {
+  for (const p of frases) {
     const limit = out.length === 0 ? first : rest;
-    if ((cur + p).length > limit && cur) { out.push(cur.trim()); cur = ''; }
-    cur += p;
+    if (cur && `${cur} ${p}`.length > limit) { out.push(cur.trim()); cur = ''; }
+    cur = cur ? `${cur} ${p}` : p;
   }
   if (cur.trim()) out.push(cur.trim());
   return out.filter(Boolean);
@@ -268,10 +279,12 @@ export function useVoice(opts: { serverTranscription: boolean; serverSpeech: boo
   const genRef = useRef(0);                       // muda a cada parada: falas antigas desistem
   const chainRef = useRef<Promise<boolean>>(Promise.resolve(true));
   const pendingRef = useRef(0);                   // falas na fila (para o estado "falando")
-  // Voz do servidor falhou (sessão caiu num reinício, Kokoro carregando…): usa a do navegador
-  // só por um tempo e depois volta a tentar a neural. Antes ficava robótica até recarregar a página.
-  const serverPausaAte = useRef(0);
-  const servidorOk = () => Date.now() >= serverPausaAte.current;
+  // Pedidos de voz em andamento: parar de falar cancela todos (no navegador e no servidor, que
+  // pula da fila o que ninguém mais espera).
+  const pedidosRef = useRef(new Set<AbortController>());
+  // A voz do navegador (robótica) só entra se o servidor não tiver voz (HTTP 501). Falha passageira
+  // tenta de novo e, se insistir, pula só aquele trecho — nunca troca de voz no meio.
+  const servidorSemVoz = useRef(false);
 
   const browserStt = typeof window !== 'undefined' && Boolean(RecognitionCtor());
   const recorderStt = typeof window !== 'undefined' && typeof MediaRecorder !== 'undefined' && Boolean(navigator.mediaDevices?.getUserMedia);
@@ -291,6 +304,8 @@ export function useVoice(opts: { serverTranscription: boolean; serverSpeech: boo
 
   const stopSpeaking = useCallback(() => {
     genRef.current++;
+    pedidosRef.current.forEach((c) => c.abort());
+    pedidosRef.current.clear();
     sourcesRef.current.forEach((s) => { try { s.stop(); } catch { /* já parou */ } });
     sourcesRef.current = [];
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
@@ -299,31 +314,49 @@ export function useVoice(opts: { serverTranscription: boolean; serverSpeech: boo
     setSpeaking(false);
   }, []);
 
-  /** Toca as frases pela voz do servidor; devolve as que sobraram se ela falhar. */
+  /**
+   * Toca as frases pela voz neural do servidor. Cada trecho é pedido com antecedência (os dois
+   * seguintes enquanto o atual toca); falha passageira tenta de novo e, se insistir, o trecho é pulado.
+   */
   const speakServer = useCallback(async (parts: string[], gen: number): Promise<{ done: boolean; rest: string[] }> => {
     const c = audio();
     if (!c) return { done: false, rest: parts };
     setEffect(opts.aiEffect);
-    const fetchPart = (text: string) => fetch('/api/voice/speak', {
-      method: 'POST', credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-    }).then(async (r) => {
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return c.decodeAudioData(await r.arrayBuffer());
-    });
-    const pending: Promise<AudioBuffer>[] = [];
+    const fetchPart = async (text: string): Promise<AudioBuffer | null> => {
+      for (let tentativa = 0; tentativa < 2; tentativa++) {
+        if (gen !== genRef.current) return null;
+        const ctrl = new AbortController();
+        pedidosRef.current.add(ctrl);
+        try {
+          const r = await fetch('/api/voice/speak', {
+            method: 'POST', credentials: 'include', signal: ctrl.signal,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text }),
+          });
+          if (r.status === 501) { servidorSemVoz.current = true; return null; }
+          if (r.status === 401 || r.status === 403) return null; // sessão caiu: a tela pede login
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return await c.decodeAudioData(await r.arrayBuffer());
+        } catch (e) {
+          if (ctrl.signal.aborted || gen !== genRef.current) return null;
+          console.warn(`[voz] trecho falhou (tentativa ${tentativa + 1}):`, e);
+          await new Promise((ok) => setTimeout(ok, 1500));
+        } finally {
+          pedidosRef.current.delete(ctrl);
+        }
+      }
+      return null;
+    };
+    const pending: Promise<AudioBuffer | null>[] = [];
     const want = (i: number) => { if (i < parts.length && !pending[i]) pending[i] = fetchPart(parts[i]); };
-    want(0); want(1);
+    want(0); want(1); want(2);
     let at = 0;
     let last: AudioBufferSourceNode | null = null;
     for (let i = 0; i < parts.length; i++) {
-      let buf: AudioBuffer;
-      try { buf = await pending[i]; } catch (e) {
-        if (i === 0) { serverPausaAte.current = Date.now() + 45_000; console.warn('[voz] voz do servidor falhou; usando a do navegador por 45 s:', e); }
-        return { done: false, rest: parts.slice(i) };
-      }
+      const buf = await pending[i];
       if (gen !== genRef.current) return { done: false, rest: [] };
+      want(i + 3);
+      if (!buf) continue; // trecho que não veio: segue para o próximo, sem trocar de voz
       want(i + 2);
       const src = c.createBufferSource();
       src.buffer = buf;
@@ -349,20 +382,20 @@ export function useVoice(opts: { serverTranscription: boolean; serverSpeech: boo
     if (!canSpeak || !text.trim()) return Promise.resolve(true);
     if (!options.append) stopSpeaking();
     const gen = genRef.current;
-    const useServer = opts.serverSpeech && servidorOk();
-    // Voz do servidor aguenta trechos longos; a do navegador (Chrome) corta falas acima de ~15 s.
-    const parts = useServer ? chunks(text, 160, 480) : chunks(text, 160, 220);
+    const useServer = opts.serverSpeech && !servidorSemVoz.current;
+    // Servidor: trechos curtos (o 1º bem curto) — cada um sai em poucos segundos e os seguintes
+    // são gerados enquanto o anterior toca. Navegador: o Chrome corta falas acima de ~15 s.
+    const parts = useServer ? chunks(text, 120, 190) : chunks(text, 160, 220);
     pendingRef.current++;
     setSpeaking(true);
     const run = async (): Promise<boolean> => {
       if (gen !== genRef.current) return false;
-      let rest = parts;
-      if (useServer && servidorOk()) {
+      if (useServer && !servidorSemVoz.current) {
         const r = await speakServer(parts, gen);
-        if (r.done || gen !== genRef.current) return r.done;
-        rest = r.rest.length ? chunks(r.rest.join(' '), 160, 220) : [];
+        if (!servidorSemVoz.current) return r.done;
       }
-      return speakBrowser(rest, () => gen === genRef.current);
+      // Só sem voz no servidor (TTS_PROVIDER=browser): a voz do próprio navegador.
+      return speakBrowser(chunks(text, 160, 220), () => gen === genRef.current);
     };
     const job = chainRef.current.then(run, run).finally(() => {
       if (gen !== genRef.current) return;
