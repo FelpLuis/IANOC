@@ -41,6 +41,9 @@ const METRICA_INDISPONIVEL: Array<[RegExp, string, string]> = [
   [/\bsla\b/, 'o cumprimento de SLA', 'Não há metas de SLA cadastradas na NIA; posso mostrar duração de atendimentos (Opa!) e tempo de resolução das O.S. (IXC).'],
 ];
 
+// Pedido de lista/filtro ("liste", "gere uma lista", "varredura", "todos os clientes que…").
+const PEDE_LISTA = /\b(lista|listar|liste|listem|levantamento|varredura|varrer|relacao|planilha|todos os|todas as|quais (os |as )?(clientes|contratos|logins|assinantes|onus)|que (possuem|possui|tem|tenham|usam))\b/;
+
 // Intenções que consultam os sistemas do NOC: pergunta de "como funciona" não as desvia.
 const CONSULTA_SISTEMAS = ['alarmes', 'eventos', 'relatorio', 'dashboard', 'opa_fila', 'opa_resumo', 'opa_protocolo', 'os_ixc', 'cliente', 'cadastrar', 'abrir', 'topologia', 'conectados', 'caminho', 'impacto', 'onus', 'ftth', 'base', 'equipamento'];
 
@@ -726,6 +729,45 @@ async function opaProtocolo(t: Turn, q: Parsed): Promise<string> {
   ].join('\n\n');
 }
 
+/** Termo do plano/produto na pergunta: "produto/serviço hotspot", "plano de 500 mega", "plano \"Empresarial\"". */
+export function termoDoPlano(original: string): string | undefined {
+  const m = original.match(/(?:planos?|produtos?|servi[cç]os?)(?:\s*\/\s*(?:planos?|produtos?|servi[cç]os?))?\s+(?:de\s+|do\s+|da\s+|chamad[oa]\s+|com\s+o\s+nome\s+)?["“'«]?([A-Za-zÀ-ú0-9][\wÀ-ú .+\-]{0,40}?)["”'»]?(?=\s+(?:e|gere|gerar|gera|gerando|para|pra|no|na|em|com|que|ativ\w*|e\s+me)\b|[?.!,;:]|$)/i);
+  const termo = m?.[1]?.trim();
+  return termo && !/^(o|a|os|as|um|uma|de|do|da|que|este|esse|isso)$/i.test(termo) ? termo : undefined;
+}
+
+interface ClientesPlano {
+  termo: string; planos_encontrados: Array<{ id: string; nome: string }>; total_contratos: number; clientes_distintos: number;
+  por_status: Record<string, number>; por_plano: Record<string, number>;
+  contratos: Array<{ cliente: string; contrato: unknown; plano: unknown; status: unknown; internet: unknown; ativacao: unknown; bairro: unknown }>;
+}
+
+/** "Faça uma varredura no IXC por todos os clientes que possuem o serviço hotspot e gere uma lista." */
+async function clientesPorPlano(t: Turn, q: Parsed): Promise<string> {
+  const termo = termoDoPlano(q.original);
+  if (!termo) return 'Qual plano ou produto, Chefe? Exemplo: "clientes com o plano hotspot" ou "quais clientes têm o plano 500 mega?".';
+  const somenteAtivos = /\bativ[oa]s\b/.test(q.texto);
+  const r = await t.call<ClientesPlano>('ixc_clientes_por_plano', { termo, ...(somenteAtivos ? { somente_ativos: true } : {}) });
+  if (!r.ok) return `Não consegui consultar o IXC: ${r.text}`;
+  const d = r.data;
+  if (!d.total_contratos) {
+    return `Varri o IXC e não encontrei contrato com plano contendo "${termo}"${somenteAtivos ? ' (só ativos)' : ''}.`
+      + (d.planos_encontrados.length ? ` Há ${plural(d.planos_encontrados.length, 'plano', 'planos')} com esse nome (${d.planos_encontrados.map((p) => p.nome).join(', ')}), mas sem contratos.` : '')
+      + '\n\n> Produtos adicionais vinculados ao contrato (fora do plano) não são liberados para o token da NIA no IXC; se o hotspot for um adicional, peça ao administrador do IXC para liberar a leitura de "vd_contratos_produtos".';
+  }
+  const ativos = d.por_status.ativo ?? 0;
+  const linhas = d.contratos.slice(0, 200);
+  return [
+    `Varredura concluída, Chefe: ${plural(d.clientes_distintos, 'cliente tem', 'clientes têm')} plano com "${termo}" no IXC — ${plural(d.total_contratos, 'contrato', 'contratos')}, ${plural(ativos, 'ativo', 'ativos')}.`,
+    d.planos_encontrados.length ? `**Planos encontrados:** ${d.planos_encontrados.map((p) => p.nome.replace(/\s*\|\s*/g, ' / ').replace(/[\s/]+$/, '')).join(' · ')}` : '',
+    '### Por status do contrato', counts(d.por_status, 'Status'),
+    `### Lista de clientes${d.contratos.length > linhas.length ? ` (primeiros ${linhas.length} de ${d.contratos.length})` : ''}`,
+    table(['Cliente', 'Contrato', 'Plano', 'Status', 'Internet', 'Ativação', 'Bairro'],
+      linhas.map((c) => [cut(c.cliente, 50), c.contrato, cut(c.plano, 50), c.status, c.internet, c.ativacao ?? '—', c.bairro ?? '—'])),
+    '> Use os botões abaixo da resposta para baixar a lista (.md) ou gerar o PDF. A busca é pelo nome do plano do contrato; produtos adicionais vinculados ao contrato não são liberados para o token da NIA no IXC.',
+  ].filter(Boolean).join('\n\n');
+}
+
 async function osIxc(t: Turn, q: Parsed): Promise<string> {
   const r = await t.call<{
     total_os: number; por_status: Record<string, number>; por_assunto: Record<string, number>; por_setor?: Record<string, number>; por_tecnico: Record<string, number>;
@@ -927,6 +969,23 @@ export async function askNative(sessionId: string, message: string, onEvent: Emi
   if (area && (codigo || ['desconhecido', 'geral', 'pesquisa', 'tecnico'].includes(q.intent)
     || (perguntaTecnica(q.texto) && (!CONSULTA_SISTEMAS.includes(q.intent) || !consultaReal)))) q.intent = 'tecnico';
 
+  // Pedido de LISTA específica (clientes, contratos, logins…) que caiu num resumo genérico: o
+  // resumo não responde a pergunta. Melhor dizer o que dá para fazer do que responder outra coisa.
+  if (['os_ixc', 'opa_resumo', 'relatorio', 'eventos'].includes(q.intent) && PEDE_LISTA.test(q.texto) && /\b(clientes?|contratos?|logins?|assinantes?|planos?|produtos?|onus?|enderecos?)\b/.test(q.texto)) {
+    return {
+      text: [
+        'Esse pedido é mais específico do que as consultas prontas que tenho, Chefe — e um resumo genérico não responderia o que você perguntou.',
+        'O que consigo listar hoje:',
+        '- **Clientes por plano/produto** — "clientes com o plano hotspot", "quais clientes têm o plano 500 mega?"',
+        '- **Um cliente** — "cliente Maria da Silva", "login joao.silva"',
+        '- **Clientes desconectados** — "clientes sem internet agora", "ONUs em LOS"',
+        '- **O.S. do período** — "O.S. da semana no IXC"',
+        'Me diga qual desses chega mais perto, ou reformule com o plano/produto, o nome do cliente ou o período.',
+      ].join('\n'),
+      model: NATIVE_LABEL, toolsUsed: [], usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    };
+  }
+
 
   const t = new Turn(onEvent);
   t.conversa = sessionId;
@@ -967,6 +1026,7 @@ async function responder(t: Turn, q: Parsed, k: Knowledge): Promise<string> {
     case 'opa_satisfacao': return on('opa') ? opaSatisfacao(t, q) : 'O Opa! Suite não está configurado neste servidor.';
     case 'opa_protocolo': return on('opa') ? opaProtocolo(t, q) : 'O Opa! Suite não está configurado neste servidor.';
     case 'os_ixc': return on('ixc') ? osIxc(t, q) : 'O IXC não está configurado neste servidor.';
+    case 'ixc_clientes_plano': return on('ixc') ? clientesPorPlano(t, q) : 'O IXC não está configurado neste servidor.';
     case 'cliente': return cliente(t, q);
     case 'ftth': return ftth(t, q);
     case 'geral': return geral(t, q);

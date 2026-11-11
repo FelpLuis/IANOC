@@ -15,7 +15,7 @@ const topPadrao = () => (nocConfig.llm.provider !== 'anthropic' && nocConfig.ope
 import { nocGet } from './connectors/noc.js';
 import { activeProblems, problemEventsReport, zabbixCall, zabbixInstanceNames } from './connectors/zabbix.js';
 import { deviceFaults, findDevices, pendingTasks } from './connectors/genieacs.js';
-import { IXC_OPERATORS, IXC_RESOURCES, ixcList, ixcOsResumo } from './connectors/ixc.js';
+import { IXC_OPERATORS, IXC_RESOURCES, ixcClientesPorPlano, ixcList, ixcOsResumo } from './connectors/ixc.js';
 import { opaAtendimentos, opaAtendimentosResumo, opaGet } from './connectors/opa.js';
 import { findEquipamento, getKnowledge, nearFtth, pathBetween, searchFtth } from './knowledge.js';
 import { buildTopology } from './topology.js';
@@ -320,6 +320,16 @@ const TOOLS = [
       top: z.number().int().min(1).max(50).optional(),
     }),
     run: ({ desde, ate, top }) => ixcOsResumo(desde, ate, top ?? topPadrao()),
+  }),
+  tool({
+    name: 'ixc_clientes_por_plano',
+    connector: 'ixc',
+    description: 'Lista os clientes cujo contrato tem um plano/produto com o termo no nome (ex.: "hotspot", "500 mega", "empresarial"): cliente, contrato, plano, status do contrato e da internet, ativação e bairro, com totais por status e por plano.',
+    schema: z.object({
+      termo: z.string().min(2).describe('nome ou parte do nome do plano/produto'),
+      somente_ativos: z.boolean().optional().describe('só contratos ativos'),
+    }),
+    run: ({ termo, somente_ativos }) => ixcClientesPorPlano(termo, { somenteAtivos: somente_ativos }),
   }),
 
   // ------------------------------------------------------------ Opa! Suite (atendimento)

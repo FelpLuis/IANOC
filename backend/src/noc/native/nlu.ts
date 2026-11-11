@@ -18,7 +18,7 @@ export type Intent =
   | 'relatorio' | 'dashboard' | 'alarmes' | 'eventos'
   | 'equipamento' | 'conectados' | 'caminho' | 'impacto' | 'topologia' | 'abrir' | 'pesquisa' | 'base' | 'cadastrar'
   | 'onus' | 'opa_fila' | 'opa_resumo' | 'opa_protocolo' | 'opa_satisfacao'
-  | 'os_ixc' | 'cliente' | 'ftth' | 'geral' | 'tecnico'
+  | 'os_ixc' | 'ixc_clientes_plano' | 'cliente' | 'ftth' | 'geral' | 'tecnico'
   | 'desconhecido';
 
 export type PeriodoNome = 'agora' | 'hoje' | 'ontem' | 'semana' | 'mes' | 'horas' | 'dias';
@@ -78,6 +78,11 @@ const RULES: Array<{ intent: Intent; peso?: number; padroes: RegExp[] }> = [
   { intent: 'opa_resumo', padroes: [/atendimentos?/, /\bopa\b/, /\bchats?\b/, /whatsapp/, /\bsuporte\b/, /\batendentes?\b/] },
   // "os" minúsculo é artigo ("quais são os aparelhos"): a sigla O.S. é checada no texto original, em maiúsculas (ver parse).
   { intent: 'os_ixc', padroes: [/ordem de servico/, /ordens de servico/, /\bchamados?\b/, /visitas? tecnica/, /\btecnicos?\b/, /\bixc\b/, /\bagendad/] },
+  // Clientes de um plano/produto ("clientes com o plano hotspot", "varredura de quem possui o serviço X").
+  { intent: 'ixc_clientes_plano', peso: 6, padroes: [
+    /\b(clientes?|contratos?|assinantes?|quem)\b.{0,60}\b(com|(que )?(tem|tenham|possuem|possua|possui|usam|usa|assinam|contrataram)|d[oa]s?|n[oa]s?)\b.{0,25}\b(planos?|produtos?|servicos?)\b/,
+    /\b(planos?|produtos?|servicos?)\b.{0,40}\b(clientes?|contratos?|assinantes?)\b/,
+  ] },
   { intent: 'cliente', peso: 1.5, padroes: [/\bcliente\s+[a-z0-9]/, /\blogin\s+[a-z0-9]/, /\bcontrato\b/, /\bassinante\b/, /\bpppoe\b/] },
   { intent: 'ftth', peso: 1.5, padroes: [/\bctos?\b/, /\bceos?\b/, /\bcaixas?\b/, /\bsplitter/, /\bfibras?\b/, /\bpostes?\b/, /\bemenda/] },
 ];
