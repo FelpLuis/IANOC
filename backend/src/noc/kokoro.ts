@@ -124,7 +124,7 @@ export async function kokoroWav(text: string): Promise<Buffer> {
     taxa = audio.sampling_rate;
     partes.push(audio.audio);
     // Pausa natural entre trechos: maior no fim de frase, menor na vírgula.
-    partes.push(new Float32Array(Math.round(taxa * (/[.!?;:]$/.test(trecho) ? 0.16 : 0.07))));
+    partes.push(new Float32Array(Math.round(taxa * (/[.!?;:]$/.test(trecho) ? 0.12 : 0.05))));
   }
   const total = partes.reduce((n, p) => n + p.length, 0);
   const tudo = new Float32Array(total);

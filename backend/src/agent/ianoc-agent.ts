@@ -7,6 +7,7 @@ import { memory } from '../memory/memory-manager.js';
 import { scanner } from '../services/project-scanner.js';
 import { randomUUID as uuidv4 } from 'node:crypto';
 import { askAssistant, llmConfigured, type AssistantEvent } from '../noc/assistant.js';
+import { emTomDeConversa } from '../noc/falado.js';
 import {
   AgentMemory,
   ChatRequest,
@@ -155,8 +156,10 @@ Você é **${identity.name} v${identity.version}**, um assistente de IA pessoal 
     // Pergunta ditada no microfone: o prompt pede um parágrafo inicial próprio para ser lido em voz alta.
     const pergunta = request.voice ? `[voz] ${request.message}` : request.message;
     const reply = await askAssistant(request.conversationId || sessionId, pergunta, onEvent, request.imagens ?? []);
+    // Por voz, o trecho falado vira conversa (frases curtas, sem pontuação de texto escrito).
+    const texto = request.voice ? await emTomDeConversa(reply.text) : reply.text;
     return {
-      message: reply.text,
+      message: texto,
       metadata: {
         intent: 'question',
         modelUsed: reply.model,

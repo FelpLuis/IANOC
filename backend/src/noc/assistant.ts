@@ -42,6 +42,8 @@ export interface AssistantReply {
   model: string;
   toolsUsed: string[];
   usage: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  /** Agente: texto bruto do que as ferramentas devolveram (para conferir se a resposta inventou dado). */
+  evidencias?: string;
 }
 
 const client = new Anthropic();

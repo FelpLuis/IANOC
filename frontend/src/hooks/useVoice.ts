@@ -114,10 +114,18 @@ export function markdownToSpeech(markdown: string, onlySummary = false): string 
     const end = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('.\n'));
     text = flat.length <= 600 ? flat : cut.slice(0, end > 200 ? end + 1 : 600);
   }
-  return naturalize(text.replace(/:\s*\n/g, '. ').replace(/\s+/g, ' ')).trim();
+  // Fala de conversa: dois-pontos, ponto e vírgula e travessão viram só uma vírgula (respiro),
+  // em vez das pausas longas de quem lê um texto escrito.
+  return naturalize(text.replace(/:\s*\n/g, '. ').replace(/\s+/g, ' '))
+    .replace(/\s*[;—–]\s*/g, ', ')
+    .replace(/(\D):\s+/g, '$1, ')
+    .replace(/\s+-\s+/g, ', ')
+    .replace(/,\s*([.!?])/g, '$1')
+    .replace(/(,\s*){2,}/g, ', ')
+    .trim();
 }
 
-const FECHOS = ['O restante está na sua tela.', 'Os detalhes estão na sua tela, Chefe.', 'Está tudo na tela.'];
+const FECHOS = ['O resto tá aí na tela.', 'Deixei os detalhes na tela pra você.', 'Tá tudo aí na tela.', 'Os detalhes tão na tela, Chefe.'];
 let ultimoFecho = -1;
 
 /**

@@ -13,7 +13,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { AssistantEvent, AssistantReply } from '../assistant.js';
-import { askOpenAiCompatible, openAiConfigured } from '../assistant-openai.js';
+import { askOpenAiCompatible, openAiConfigured, resetOpenAiConversation } from '../assistant-openai.js';
 import { runTool, connectorStatus } from '../tools.js';
 import { extractDevices } from '../devices.js';
 import { getKnowledge, type Equipamento, type Knowledge } from '../knowledge.js';
@@ -45,11 +45,39 @@ const METRICA_INDISPONIVEL: Array<[RegExp, string, string]> = [
 // Assunto dos sistemas do NOC numa pergunta que o motor não reconheceu: vai para o agente.
 const ASSUNTO_NOC = /\b(zabbix|ixc|opa|olts?|onus?|onts?|clientes?|contratos?|planos?|logins?|pppoe|alarmes?|hosts?|cto|ceo|caixas?|backbone|pops?|switch|roteador|concentrador|bras|o\.?s|ordens? de servico|atendimentos?|protocolos?|fibra|sinal|links?|enlaces?|rede|genieacs|tr-?069|vlan)\b/;
 
+// Respostas do motor que não resolveram: não achou o item ou pediu dados que já estavam na pergunta.
+const NAO_RESOLVEU = /^(Não achei|Não encontrei|Qual equipamento\?|De qual equipamento|Qual plano ou produto|Sobre o quê|Não consegui mapear|Essa passou fora do meu radar)/;
+
+/**
+ * Dados "duros" da resposta que não aparecem em nada que os sistemas devolveram: números de
+ * contrato/ID, IPs, MACs, logins (nome.sobrenome) e seriais. Anos e contagens pequenas não contam.
+ */
+export function dadosInventados(resposta: string, evidencias: string): string[] {
+  const base = norm(evidencias).replace(/[^a-z0-9.:]/g, ' ');
+  const achados = new Set<string>();
+  const padrao = /\b\d{1,3}(?:\.\d{1,3}){3}\b|\b[0-9a-f]{2}(?::[0-9a-f]{2}){5}\b|\b[a-z][a-z0-9_]*\.[a-z][a-z0-9_.]*\b|\b(?=[a-z0-9]*\d)(?=[a-z0-9]*[a-z])[a-z0-9]{8,}\b|\b\d{4,}\b/gi;
+  for (const m of norm(resposta).matchAll(padrao)) {
+    const t = m[0].replace(/\.$/, '');
+    if (/^(19|20)\d{2}$/.test(t)) continue;                       // ano
+    if (/\.(com|br|net|org|io)(\.|$)/.test(t)) continue;           // domínio
+    if (/^(ex|etc|obs|sr|sra|dr|p)\./.test(t)) continue;            // abreviação
+    if (!base.includes(t)) achados.add(t);
+  }
+  return [...achados];
+}
+
 /** Agente com modelo e todas as ferramentas da NIA (assistant-openai.ts); null se não houver ou falhar. */
 async function viaAgente(sessionId: string, message: string, onEvent: Emit): Promise<AssistantReply | null> {
   if (!openAiConfigured()) return null;
   try {
     const r = await askOpenAiCompatible(sessionId, message, onEvent);
+    // Trava contra invenção: dado que não veio de nenhum sistema descarta a resposta.
+    const inventados = dadosInventados(r.text, r.evidencias ?? message);
+    if (inventados.length >= 2) {
+      console.warn(`[nia] agente descartado (${r.model}): dados que não vieram dos sistemas: ${inventados.slice(0, 8).join(', ')}`);
+      resetOpenAiConversation(sessionId);
+      return null;
+    }
     return { ...r, model: `NIA · agente ${r.model}` };
   } catch (e) {
     console.warn('[nia] agente indisponível:', e instanceof Error ? e.message : e);
@@ -1019,6 +1047,12 @@ export async function askNative(sessionId: string, message: string, onEvent: Emi
     text = await responder(t, q, k);
   } catch (e) {
     text = nia.erro(e instanceof Error ? e.message : String(e));
+  }
+  // O motor não achou o que foi pedido ou só pediu mais dados (entendeu errado o nome do cliente,
+  // do equipamento…): o agente com modelo tenta com a pergunta original, montando a consulta sozinho.
+  if (NAO_RESOLVEU.test(text.trim()) && !['saudacao', 'agradecimento', 'ajuda', 'cadastrar', 'abrir'].includes(q.intent)) {
+    const r = await viaAgente(sessionId, message, onEvent);
+    if (r) return { ...r, toolsUsed: [...t.toolsUsed, ...r.toolsUsed] };
   }
   if (!['saudacao', 'agradecimento', 'ajuda', 'desconhecido'].includes(q.intent)) { ctx.last = q; ctx.lastIntent = q.intent; }
   return { text, model: t.modelo ? `NIA · ${t.modelo} (${q.intent === 'tecnico' ? 'especialista' : 'pergunta geral'})` : NATIVE_LABEL, toolsUsed: t.toolsUsed, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };

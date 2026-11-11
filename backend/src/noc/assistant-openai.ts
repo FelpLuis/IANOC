@@ -130,6 +130,12 @@ async function post(url: string, body: unknown, waited = { left: cfg.rateLimitWa
     throw new Error(`${cfg.provider}: o Google não libera a cota gratuita para o projeto desta chave. Ative o faturamento em https://aistudio.google.com/billing ou troque LLM_PROVIDER no .env.`);
   }
   if (res.status === 401 || res.status === 403) throw new Error(`${cfg.provider}: chave recusada (HTTP ${res.status}). Confira LLM_API_KEY no .env.`);
+  // Erro passageiro do provedor (comum nos modelos gratuitos): tenta mais uma vez depois de 2 s.
+  if ([500, 502, 503, 504].includes(res.status) && waited.left > 0 && !(waited as { repetiu?: boolean }).repetiu) {
+    console.warn(`[llm] HTTP ${res.status} passageiro; tentando de novo`);
+    await new Promise((r) => setTimeout(r, 2000));
+    return post(url, body, { ...waited, repetiu: true } as typeof waited);
+  }
   if (!res.ok) throw new Error(`${cfg.provider}: HTTP ${res.status} — ${text.slice(0, 300)}`);
   try { return JSON.parse(text); } catch { throw new Error(`${cfg.provider}: resposta inválida.`); }
 }
@@ -207,8 +213,12 @@ async function callOpenAi(system: string, history: Msg[], withTools: boolean): P
       };
     }),
   ];
+  // OpenRouter: LLM_MODELOS_RESERVA (separados por vírgula) entram como "models" — se o modelo
+  // principal estiver fora ou no limite (comum nos gratuitos), ele passa para o próximo sozinho.
+  const reserva = (process.env.LLM_MODELOS_RESERVA || '').split(',').map((m) => m.trim()).filter(Boolean);
   const data = await post(`${cfg.baseUrl}/chat/completions`, {
     model: cfg.model,
+    ...(reserva.length && cfg.baseUrl.includes('openrouter.ai') ? { models: [cfg.model, ...reserva] } : {}),
     messages,
     max_tokens: maxTokensFor(system, messages),
     temperature: 0.2,
@@ -312,6 +322,9 @@ async function runTurn(history: Msg[], userMessage: string, onEvent: (event: Ass
   };
   const call = isOllama() ? callOllama : callOpenAi;
   const toolsUsed: string[] = [];
+  // Tudo o que as ferramentas devolveram nesta pergunta: a NIA confere a resposta contra isso
+  // (dado que não veio de nenhum sistema é invenção do modelo).
+  const evidencias: string[] = [userMessage];
   const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   let model = cfg.model;
 
@@ -326,7 +339,7 @@ async function runTurn(history: Msg[], userMessage: string, onEvent: (event: Ass
     if (turn.toolCalls.length === 0) {
       let text = turn.text;
       if (turn.truncated) text += '\n\n_(resposta cortada pelo limite de tamanho — peça a continuação)_';
-      return { text: text || '_(sem resposta)_', model, toolsUsed, usage };
+      return { text: text || '_(sem resposta)_', model, toolsUsed, usage, evidencias: evidencias.join('\n') };
     }
 
     const reports: string[] = [];
@@ -335,6 +348,7 @@ async function runTurn(history: Msg[], userMessage: string, onEvent: (event: Ass
         const started = Date.now();
         onEvent({ type: 'tool_start', id: c.id, name: c.name, input: c.args });
         const { text, isError, data } = await runTool(c.name, c.args);
+        if (!isError) evidencias.push(text);
         const devices = isError ? [] : await extractDevices(c.name, c.args, data);
         const topology = !isError && c.name === 'backbone_topologia' ? data : undefined;
         onEvent({ type: 'tool_end', id: c.id, name: c.name, ok: !isError, ms: Date.now() - started, ...(devices.length ? { devices } : {}), ...(topology ? { topology } : {}) });
