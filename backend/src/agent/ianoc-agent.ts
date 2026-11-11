@@ -154,7 +154,7 @@ Você é **${identity.name} v${identity.version}**, um assistente de IA pessoal 
   private async askNoc(request: ChatRequest, sessionId: string, onEvent?: (event: AssistantEvent) => void): Promise<ChatResponse> {
     // Pergunta ditada no microfone: o prompt pede um parágrafo inicial próprio para ser lido em voz alta.
     const pergunta = request.voice ? `[voz] ${request.message}` : request.message;
-    const reply = await askAssistant(request.conversationId || sessionId, pergunta, onEvent);
+    const reply = await askAssistant(request.conversationId || sessionId, pergunta, onEvent, request.imagens ?? []);
     return {
       message: reply.text,
       metadata: {

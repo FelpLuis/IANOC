@@ -247,6 +247,8 @@ export interface Message {
   // Páginas que a NIA abriu (ou tentou abrir) no navegador para esta resposta.
   actions?: Array<{ url: string; label: string; opened: boolean }>;
   pendentes?: AcaoPendente[];
+  // Imagens que o operador anexou (prévias locais).
+  imagens?: string[];
   dashboard?: Dashboard;
 }
 
@@ -286,6 +288,8 @@ export interface ChatRequest {
   model?: string;
   /** Pergunta ditada no microfone: a resposta começa com um resumo para ser falado. */
   voice?: boolean;
+  /** Imagens anexadas (ids de POST /api/imagens). */
+  imagens?: string[];
 }
 
 export interface ChatResponse {

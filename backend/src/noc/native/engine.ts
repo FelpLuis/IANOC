@@ -28,6 +28,7 @@ import { dur } from './analysis.js';
 import { parse, norm, type Intent, type Parsed, type Periodo } from './nlu.js';
 import * as nia from './persona.js';
 import { dashboardDeAlarmes, dashboardDeSatisfacao } from '../dashboard.js';
+import { analisarImagens, type AnaliseImagem } from '../imagens.js';
 import { calcular, dataHora, llmGeral, resetGeral, responderGeral, responderTecnico } from './geral.js';
 import { dominioTecnico, pedidoDeCodigo, perguntaTecnica } from './especialidades.js';
 
@@ -820,9 +821,47 @@ const AJUDA = [
   nia.ajudaFim(),
 ].join('\n');
 
+// ------------------------------------------------------------------ imagens
+
+// Pedido que usa os sistemas do NOC: o texto lido na imagem entra como dado da consulta
+// ("procure esse cliente", "cadastre esse equipamento", "verifique esse alarme").
+// Precisa de um pedido de AÇÃO: "que equipamento é esse?" é pergunta para a visão, não consulta.
+const PEDIDO_OPERACIONAL = /\b(cadastr\w*|procur\w*|busc\w*|consult\w*|verifi\w*|localiz\w*|confir\w*|cheq\w*|chec\w*|pesquis\w* n[oa] (zabbix|ixc|opa|noc)|(veja|ver|mostr\w*) (os |o |as |a )?(alarmes?|status|sinal|atendimento|protocolo|cliente|o\.?s))\b/;
+// Respostas do motor que só pedem mais dados: nesse caso a resposta da visão é melhor.
+const SO_PEDE_DADOS = /^(Qual equipamento\?|De qual equipamento|Sobre o quê|Não consegui mapear|Essa passou fora do meu radar)/;
+const ZERO = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+
+async function responderComImagens(sessionId: string, message: string, imagens: string[], onEvent: Emit): Promise<AssistantReply> {
+  const t = new Turn(onEvent);
+  t.conversa = sessionId;
+  const pedido = message.replace(/^\s*\[voz\]\s*/i, '').trim();
+  let a: AnaliseImagem;
+  try {
+    a = await t.track('imagem_analise', { imagens: imagens.length }, () => analisarImagens(imagens, pedido));
+  } catch (e) {
+    return { text: `Não consegui analisar a imagem: ${e instanceof Error ? e.message : String(e)}.`, model: NATIVE_LABEL, toolsUsed: t.toolsUsed, usage: ZERO };
+  }
+  const rotulo = a.modelo ? `NIA · ${a.modelo} (visão)` : 'NIA · OCR local';
+  const blocoTexto = a.texto ? `### Texto lido na imagem\n\n\`\`\`\n${a.texto.slice(0, 4000)}\n\`\`\`` : '';
+  if (pedido && a.texto && PEDIDO_OPERACIONAL.test(norm(pedido))) {
+    const r = await askNative(sessionId, `${message}\n${a.texto.slice(0, 2000)}`, onEvent);
+    if (SO_PEDE_DADOS.test(r.text.trim())) {
+      return { text: [a.resposta, blocoTexto].filter(Boolean).join('\n\n'), model: rotulo, toolsUsed: [...t.toolsUsed, ...r.toolsUsed], usage: ZERO };
+    }
+    return {
+      ...r,
+      text: [`📷 ${a.descricao || 'Li a imagem e usei o texto dela na consulta.'}`, r.text, blocoTexto].filter(Boolean).join('\n\n'),
+      toolsUsed: [...t.toolsUsed, ...r.toolsUsed],
+    };
+  }
+  const descricao = a.descricao && !a.resposta.includes(a.descricao.slice(0, 40)) ? `> ${a.descricao}` : '';
+  return { text: [a.resposta, descricao, blocoTexto].filter(Boolean).join('\n\n'), model: rotulo, toolsUsed: t.toolsUsed, usage: ZERO };
+}
+
 // ------------------------------------------------------------------ entrada
 
-export async function askNative(sessionId: string, message: string, onEvent: Emit = () => {}): Promise<AssistantReply> {
+export async function askNative(sessionId: string, message: string, onEvent: Emit = () => {}, imagens: string[] = []): Promise<AssistantReply> {
+  if (imagens.length) return responderComImagens(sessionId, message, imagens, onEvent);
   const k = await getKnowledge();
   const ctx = contexts.get(sessionId) ?? {};
   contexts.set(sessionId, ctx);

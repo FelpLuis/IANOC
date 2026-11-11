@@ -21,6 +21,7 @@ import { askOpenAiCompatible, openAiConfigured, resetOpenAiConversation } from '
 import { extractReport, REPORT_TOOL } from './report.js';
 import { extractDevices, type DeviceCard } from './devices.js';
 import { askNative, NATIVE_LABEL, resetNative } from './native/engine.js';
+import { analisarImagens } from './imagens.js';
 import { llmGeral } from './native/geral.js';
 
 type MessageParam = Anthropic.Beta.Messages.BetaMessageParam;
@@ -77,10 +78,17 @@ function trimHistory(history: MessageParam[]) {
 
 export async function askAssistant(
   sessionId: string,
-  userMessage: string,
+  mensagem: string,
   onEvent: (event: AssistantEvent) => void = () => {},
+  imagens: string[] = [],
 ): Promise<AssistantReply> {
-  if (usesNative()) return askNative(sessionId, userMessage, onEvent);
+  if (usesNative()) return askNative(sessionId, mensagem, onEvent, imagens);
+  // Nos modos com modelo externo, a imagem entra como descrição + texto lido.
+  let userMessage = mensagem;
+  if (imagens.length) {
+    const a = await analisarImagens(imagens, mensagem).catch(() => null);
+    if (a) userMessage = `${mensagem}\n\n[Imagem anexada] ${a.descricao}\nTexto na imagem:\n${a.texto || '(nenhum)'}`;
+  }
   if (!usesClaude()) return askOpenAiCompatible(sessionId, userMessage, onEvent);
   const history = histories.get(sessionId) ?? [];
   histories.set(sessionId, history);

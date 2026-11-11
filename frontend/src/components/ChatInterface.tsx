@@ -22,7 +22,10 @@ import {
   Headset,
   Network,
   ExternalLink,
+  ImagePlus,
+  X,
 } from 'lucide-react';
+import { enviarImagem } from '../utils/imagem';
 import { cn, formatRelativeTime } from '../utils/helpers';
 import { earcon, markdownToSpeech, resumoFalado, useVoice, type ListenEnd } from '../hooks/useVoice';
 import { abrirDocumento, downloadMarkdown } from '../utils/report';
@@ -108,6 +111,7 @@ const TOOL_LABELS: Record<string, string> = {
   base_conhecimento: 'Base de conhecimento',
   resposta_geral: 'IA · escrevendo a resposta',
   resposta_tecnica: 'IA · especialista em engenharia',
+  imagem_analise: 'Visão · lendo a imagem',
 };
 export const toolLabel = (name: string) => TOOL_LABELS[name] ?? name;
 
@@ -121,7 +125,7 @@ interface ChatInterfaceProps {
   isLoading: boolean;
   currentProject?: { id: string; name: string } | null;
   projectFiles: FileInfo[];
-  onSendMessage: (content: string, options?: { contextFiles?: string[]; voice?: boolean }) => void;
+  onSendMessage: (content: string, options?: { contextFiles?: string[]; voice?: boolean; imagens?: string[]; previews?: string[] }) => void;
   suggestions?: string[];
   toolActivity?: ToolActivity[];
   onOpenDevices?: (devices: DeviceCard[], index: number) => void;
@@ -137,6 +141,22 @@ export function ChatInterface({
   onOpenTopology,
 }: ChatInterfaceProps) {
   const [input, setInput] = useState('');
+  // Imagens anexadas à próxima pergunta: prévia local + id devolvido pelo servidor.
+  const [anexos, setAnexos] = useState<Array<{ chave: string; url: string; id?: string; erro?: string }>>([]);
+  const [arrastando, setArrastando] = useState(false);
+  const arquivoRef = useRef<HTMLInputElement>(null);
+  const enviandoImagem = anexos.some((a) => !a.id && !a.erro);
+  const adicionarImagens = (arquivos: File[]) => {
+    const imagens = arquivos.filter((f) => f.type.startsWith('image/')).slice(0, Math.max(0, 4 - anexos.length));
+    for (const f of imagens) {
+      const chave = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const url = URL.createObjectURL(f);
+      setAnexos((xs) => [...xs, { chave, url }]);
+      enviarImagem(f)
+        .then((id) => setAnexos((xs) => xs.map((a) => (a.chave === chave ? { ...a, id } : a))))
+        .catch((e: Error) => setAnexos((xs) => xs.map((a) => (a.chave === chave ? { ...a, erro: e.message } : a))));
+    }
+  };
   const [expandedCode, setExpandedCode] = useState<string | null>(null);
   const [showReports, setShowReports] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
@@ -294,14 +314,20 @@ export function ChatInterface({
   });
 
   const send = (text: string) => {
-    if (!text.trim() || isLoading) return;
+    const prontas = anexos.filter((a) => a.id);
+    if ((!text.trim() && !prontas.length) || isLoading || enviandoImagem) return;
     setShowReports(false);
-    onSendMessage(text.trim());
+    if (prontas.length) {
+      onSendMessage(text.trim() || 'Analise esta imagem.', { imagens: prontas.map((a) => a.id!), previews: prontas.map((a) => a.url) });
+      setAnexos([]);
+    } else {
+      onSendMessage(text.trim());
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isLoading) return;
+    if ((!input.trim() && !anexos.some((a) => a.id)) || isLoading || enviandoImagem) return;
     send(input);
     setInput('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -447,6 +473,11 @@ export function ChatInterface({
                     ref={(el) => { if (el) bubbleRefs.current.set(message.id, el); else bubbleRefs.current.delete(message.id); }}
                     className={cn('inline-block max-w-full text-left', isUser ? 'message-user' : 'message-assistant hud-corners w-full px-4 py-3 sm:px-5')}
                   >
+                    {isUser && message.imagens && message.imagens.length > 0 && (
+                      <div className="mb-2 flex flex-wrap justify-end gap-1.5">
+                        {message.imagens.map((src) => <img key={src} src={src} alt="Imagem enviada" className="max-h-44 max-w-[14rem] rounded-lg border border-white/20 object-cover" />)}
+                      </div>
+                    )}
                     {isUser ? <div className="whitespace-pre-wrap text-[0.94rem] font-medium">{message.content}</div> : renderMessageContent(message.content, isNewest)}
                   </div>
 
@@ -574,7 +605,13 @@ export function ChatInterface({
       </div>
 
       {/* Campo de pergunta */}
-      <form onSubmit={handleSubmit} className="px-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] pt-2 sm:px-6">
+      <form
+        onSubmit={handleSubmit}
+        onDragOver={(e) => { if ([...e.dataTransfer.items].some((i) => i.type.startsWith('image/'))) { e.preventDefault(); setArrastando(true); } }}
+        onDragLeave={() => setArrastando(false)}
+        onDrop={(e) => { e.preventDefault(); setArrastando(false); adicionarImagens([...e.dataTransfer.files]); }}
+        className={cn('px-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] pt-2 transition-colors sm:px-6', arrastando && 'bg-cyan-400/5')}
+      >
         <div className="mx-auto max-w-4xl">
           {(conversation || voice.listening || voice.transcribing || voice.speaking) && (
             <VoiceStatus
@@ -609,10 +646,39 @@ export function ChatInterface({
             </div>
           )}
 
+          {/* Imagens anexadas (prévia, enviando, erro) */}
+          {(anexos.length > 0 || arrastando) && (
+            <div className="mb-2 flex flex-wrap items-center gap-2 animate-slide-up">
+              {anexos.map((a) => (
+                <div key={a.chave} className={cn('relative h-16 w-16 overflow-hidden rounded-xl border', a.erro ? 'border-rose-400/70' : 'border-cyan-400/40')} title={a.erro ?? (a.id ? 'Pronta para enviar' : 'Enviando…')}>
+                  <img src={a.url} alt="Imagem anexada" className={cn('h-full w-full object-cover', !a.id && 'opacity-50')} />
+                  {!a.id && !a.erro && <Loader2 className="absolute inset-0 m-auto h-5 w-5 animate-spin text-cyan-200" />}
+                  {a.erro && <span className="absolute inset-x-0 bottom-0 bg-rose-600/90 px-1 text-center text-[9px] text-white">falhou</span>}
+                  <button type="button" onClick={() => setAnexos((xs) => xs.filter((x) => x.chave !== a.chave))} className="absolute right-0.5 top-0.5 rounded-full bg-slate-950/80 p-0.5 text-slate-200 hover:text-white" title="Remover">
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+              {arrastando && <span className="text-xs text-cyan-200">Solte a imagem para anexar</span>}
+              {anexos.some((a) => a.id) && !arrastando && <span className="text-[11px] text-slate-400">A NIA lê a imagem e o texto dela (até 4 por pergunta).</span>}
+            </div>
+          )}
+
           <div className="glass flex items-end gap-1 rounded-2xl p-1.5 transition-all focus-within:border-cyan-400/40 focus-within:shadow-[0_0_30px_-12px_rgba(18,186,234,0.8)] sm:gap-1.5 sm:p-2">
             <button type="button" onClick={() => setShowReports(!showReports)} className={showReports ? 'icon-btn-active' : 'icon-btn'} title="Relatórios">
               <FileBarChart className="h-5 w-5" />
             </button>
+            <button type="button" onClick={() => arquivoRef.current?.click()} disabled={isLoading || anexos.length >= 4} className="icon-btn disabled:opacity-40" title="Anexar imagem (ou cole com Ctrl+V / arraste aqui)">
+              <ImagePlus className="h-5 w-5" />
+            </button>
+            <input
+              ref={arquivoRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => { adicionarImagens([...(e.target.files ?? [])]); e.target.value = ''; }}
+            />
             {voice.canSpeak && (
               <button type="button" onClick={toggleAutoSpeak} className={cn(autoSpeak ? 'icon-btn-active' : 'icon-btn', 'hidden sm:block')} title={autoSpeak ? 'Leitura automática das respostas: ligada' : 'Leitura automática das respostas: desligada'}>
                 {autoSpeak ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5" />}
@@ -624,7 +690,11 @@ export function ChatInterface({
               value={input}
               onChange={(e) => { setInput(e.target.value); autoGrow(e.target); }}
               onKeyDown={handleKeyDown}
-              placeholder="Pergunte sobre a rede…"
+              onPaste={(e) => {
+                const imgs = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/'));
+                if (imgs.length) { e.preventDefault(); adicionarImagens(imgs); }
+              }}
+              placeholder={anexos.length ? 'O que fazer com a imagem? (ou envie só ela)' : 'Pergunte sobre a rede ou cole uma imagem…'}
               disabled={isLoading}
               rows={1}
               className="max-h-40 min-h-[40px] min-w-0 flex-1 resize-none overflow-hidden bg-transparent placeholder:truncate px-2 py-2 text-[0.95rem] text-slate-100 placeholder:text-slate-500 focus:outline-none disabled:opacity-60"
@@ -650,7 +720,7 @@ export function ChatInterface({
                 {voice.transcribing ? <Loader2 className="h-5 w-5 animate-spin" /> : voice.listening ? <Square className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
               </button>
             )}
-            <button type="submit" disabled={!input.trim() || isLoading} className="btn-primary flex-shrink-0 rounded-xl p-2.5" title="Enviar">
+            <button type="submit" disabled={(!input.trim() && !anexos.some((a) => a.id)) || isLoading || enviandoImagem} className="btn-primary flex-shrink-0 rounded-xl p-2.5" title="Enviar">
               {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
             </button>
           </div>

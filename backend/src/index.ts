@@ -21,6 +21,7 @@ import multer from 'multer';
 import { adicionarArquivo as kbAdicionar, caminhoArquivo as kbCaminho, listar as kbListar, obter as kbObter, remover as kbRemover, type KbTipo } from './noc/kb.js';
 import { gerarDocumento, lerIdentidade, salvarIdentidade } from './noc/documento.js';
 import { inscreverTv, rodadaDeVoz } from './noc/tv.js';
+import { guardarImagem } from './noc/imagens.js';
 import { cancelar as cancelarAcao, confirmar as confirmarAcao } from './noc/acoes.js';
 import { acessoPublico, authenticateUpgrade, authEnabled, clientIp, ipAllowed, handleLogin, handleLogout, handleMe, handlePassword, requireAuth, type SessionUser } from './auth.js';
 import type { IncomingMessage } from 'http';
@@ -167,6 +168,21 @@ app.post('/api/voice/speak', express.json({ limit: '16kb' }), async (req, res) =
     if (error instanceof FalaCancelada || abandonado) return;
     console.warn('[voz] síntese falhou:', error instanceof Error ? error.message : error);
     res.status(502).json({ error: `Voz falhou: ${error instanceof Error ? error.message : String(error)}` });
+  }
+});
+
+// ============ Imagens do chat (fotos, prints) ============
+
+// A imagem fica só na memória por 2 horas (noc/imagens.ts); a pergunta do chat leva o id.
+const uploadImagem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 1 } });
+app.post('/api/imagens', uploadImagem.single('imagem'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Envie a imagem no campo "imagem".' });
+  try {
+    const r = await guardarImagem(req.file.buffer, res.locals.user?.username ?? 'dev');
+    console.log(`[imagem] ${res.locals.user?.username ?? 'dev'} enviou ${r.largura}x${r.altura} (${Math.round(r.bytes / 1024)} KB)`);
+    res.json(r);
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
   }
 });
 
@@ -494,6 +510,10 @@ async function handleWebSocketMessage(clientId: string, ws: WebSocket, message: 
   switch (message.type) {
     case 'chat': {
       const request = message.payload as ChatRequest;
+      // Imagens: só ids no formato devolvido por POST /api/imagens, no máximo 4 por pergunta.
+      request.imagens = Array.isArray(request.imagens)
+        ? request.imagens.filter((id): id is string => typeof id === 'string' && /^[a-f0-9]{32}$/.test(id)).slice(0, 4)
+        : [];
       if (request.projectId) currentProjectId = request.projectId;
       // Registro de uso: quem perguntou o quê (vai para o journal do systemd).
       console.log(`[chat] ${clientUsers.get(clientId)}: ${String(request.message).slice(0, 200).replace(/\s+/g, ' ')}`);

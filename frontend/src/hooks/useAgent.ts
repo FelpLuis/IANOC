@@ -188,13 +188,14 @@ export function useAgent() {
   }, []);
 
   // Send chat message
-  const sendMessage = useCallback(async (content: string, options?: { projectId?: string; contextFiles?: string[]; voice?: boolean }) => {
+  const sendMessage = useCallback(async (content: string, options?: { projectId?: string; contextFiles?: string[]; voice?: boolean; imagens?: string[]; previews?: string[] }) => {
     const userMsg: Message = {
       id: `msg-${Date.now()}`,
       role: 'user',
       content,
       timestamp: Date.now(),
       metadata: { projectId: options?.projectId, fileRefs: options?.contextFiles },
+      ...(options?.previews?.length ? { imagens: options.previews } : {}),
     };
     setMessages(prev => [...prev, userMsg]);
     setError(null);
@@ -207,6 +208,7 @@ export function useAgent() {
         projectId: options?.projectId || currentProject?.id,
         contextFiles: options?.contextFiles,
         voice: options?.voice,
+        ...(options?.imagens?.length ? { imagens: options.imagens } : {}),
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send message');

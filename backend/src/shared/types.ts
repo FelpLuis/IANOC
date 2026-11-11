@@ -313,6 +313,8 @@ export interface ChatRequest {
   conversationId?: string;
   /** Pergunta feita por voz: a resposta começa com um resumo para ser falado. */
   voice?: boolean;
+  /** Imagens anexadas (ids devolvidos por POST /api/imagens). */
+  imagens?: string[];
 }
 
 export interface ChatResponse {
