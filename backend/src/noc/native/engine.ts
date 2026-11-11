@@ -13,6 +13,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { AssistantEvent, AssistantReply } from '../assistant.js';
+import { askOpenAiCompatible, openAiConfigured } from '../assistant-openai.js';
 import { runTool, connectorStatus } from '../tools.js';
 import { extractDevices } from '../devices.js';
 import { getKnowledge, type Equipamento, type Knowledge } from '../knowledge.js';
@@ -40,6 +41,21 @@ const METRICA_INDISPONIVEL: Array<[RegExp, string, string]> = [
   [/\b(tempo (medio )?de espera|tme|primeira resposta|tempo ate (o )?atendimento)\b/, 'o tempo de espera até o primeiro atendimento', 'O Opa! entrega abertura e fim do atendimento: posso dar a duração total (média, mediana e 90%) — pergunte "duração dos atendimentos de hoje".'],
   [/\bsla\b/, 'o cumprimento de SLA', 'Não há metas de SLA cadastradas na NIA; posso mostrar duração de atendimentos (Opa!) e tempo de resolução das O.S. (IXC).'],
 ];
+
+// Assunto dos sistemas do NOC numa pergunta que o motor não reconheceu: vai para o agente.
+const ASSUNTO_NOC = /\b(zabbix|ixc|opa|olts?|onus?|onts?|clientes?|contratos?|planos?|logins?|pppoe|alarmes?|hosts?|cto|ceo|caixas?|backbone|pops?|switch|roteador|concentrador|bras|o\.?s|ordens? de servico|atendimentos?|protocolos?|fibra|sinal|links?|enlaces?|rede|genieacs|tr-?069|vlan)\b/;
+
+/** Agente com modelo e todas as ferramentas da NIA (assistant-openai.ts); null se não houver ou falhar. */
+async function viaAgente(sessionId: string, message: string, onEvent: Emit): Promise<AssistantReply | null> {
+  if (!openAiConfigured()) return null;
+  try {
+    const r = await askOpenAiCompatible(sessionId, message, onEvent);
+    return { ...r, model: `NIA · agente ${r.model}` };
+  } catch (e) {
+    console.warn('[nia] agente indisponível:', e instanceof Error ? e.message : e);
+    return null;
+  }
+}
 
 // Pedido de lista/filtro ("liste", "gere uma lista", "varredura", "todos os clientes que…").
 const PEDE_LISTA = /\b(lista|listar|liste|listem|levantamento|varredura|varrer|relacao|planilha|todos os|todas as|quais (os |as )?(clientes|contratos|logins|assinantes|onus)|que (possuem|possui|tem|tenham|usam))\b/;
@@ -969,9 +985,18 @@ export async function askNative(sessionId: string, message: string, onEvent: Emi
   if (area && (codigo || ['desconhecido', 'geral', 'pesquisa', 'tecnico'].includes(q.intent)
     || (perguntaTecnica(q.texto) && (!CONSULTA_SISTEMAS.includes(q.intent) || !consultaReal)))) q.intent = 'tecnico';
 
+  // Pergunta sobre a rede/sistemas que o motor não reconheceu: o agente com modelo (OpenRouter,
+  // Groq…) escolhe e combina as consultas sozinho. Sem agente, segue para a resposta geral.
+  if (q.intent === 'geral' && ASSUNTO_NOC.test(q.texto)) {
+    const r = await viaAgente(sessionId, message, onEvent);
+    if (r) return r;
+  }
+
   // Pedido de LISTA específica (clientes, contratos, logins…) que caiu num resumo genérico: o
-  // resumo não responde a pergunta. Melhor dizer o que dá para fazer do que responder outra coisa.
+  // resumo não responde a pergunta. Com agente, ele monta a consulta; sem, dizemos o que dá para fazer.
   if (['os_ixc', 'opa_resumo', 'relatorio', 'eventos'].includes(q.intent) && PEDE_LISTA.test(q.texto) && /\b(clientes?|contratos?|logins?|assinantes?|planos?|produtos?|onus?|enderecos?)\b/.test(q.texto)) {
+    const r = await viaAgente(sessionId, message, onEvent);
+    if (r) return r;
     return {
       text: [
         'Esse pedido é mais específico do que as consultas prontas que tenho, Chefe — e um resumo genérico não responderia o que você perguntou.',
