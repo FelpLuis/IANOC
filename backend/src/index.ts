@@ -7,7 +7,7 @@ import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID as uuidv4 } from 'node:crypto';
 import { agent } from './agent/ianoc-agent.js';
 import { memory } from './memory/memory-manager.js';
 import { scanner } from './services/project-scanner.js';
@@ -41,6 +41,8 @@ const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({
   server,
+  // Mensagens do chat são texto: 1 MB basta (o padrão da biblioteca, 100 MB, permitia derrubar o serviço).
+  maxPayload: 1024 * 1024,
   // Sem sessão válida do NOC, o upgrade do WebSocket é recusado antes de abrir.
   verifyClient: (info, done) => {
     authenticateUpgrade(info.req)
@@ -69,11 +71,34 @@ app.use((req, res, next) => {
   console.warn(`[acesso] bloqueado: ${clientIp(req.socket.remoteAddress, req.headers['x-forwarded-for'])} ${req.method} ${req.path}`);
   res.status(403).type('text').send('Acesso não permitido a partir deste endereço.');
 });
+// Cabeçalhos de segurança em toda resposta: sem embutir a NIA em outro site (clickjacking), sem
+// adivinhar tipo de arquivo, sem vazar a URL e com o microfone só para a própria NIA. Em produção,
+// a política de conteúdo (CSP) só deixa rodar o script do próprio site; rotas que servem
+// documento/arquivo trocam por uma CSP ainda mais fechada.
+const PRODUCAO = process.env.NODE_ENV === 'production';
+const CSP_APP = [
+  "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' data: https://fonts.gstatic.com", "img-src 'self' data: blob:", "media-src 'self' data: blob:",
+  "connect-src 'self'", "worker-src 'self' blob:", "frame-ancestors 'none'", "base-uri 'self'", "form-action 'self'", "object-src 'none'",
+].join('; ');
+app.disable('x-powered-by');
+// Parâmetros de URL simples (sem objetos aninhados): o leitor "extended" (qs) tem falhas conhecidas e a NIA não precisa dele.
+app.set('query parser', 'simple');
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'microphone=(self), camera=(), geolocation=(), payment=()');
+  if (PRODUCAO) res.setHeader('Content-Security-Policy', CSP_APP);
+  next();
+});
+// CORS: em produção, só a origem oficial; as de localhost são do desenvolvimento.
 app.use(cors({
-  origin: [CORS_ORIGIN, 'http://localhost:5174', 'http://127.0.0.1:5174', 'http://127.0.0.1:5173', 'http://localhost:5173'],
+  origin: PRODUCAO ? [CORS_ORIGIN] : [CORS_ORIGIN, 'http://localhost:5174', 'http://127.0.0.1:5174', 'http://127.0.0.1:5173', 'http://localhost:5173'],
   credentials: true
 }));
-app.use(express.json({ limit: '10mb' }));
+// Os corpos JSON da NIA são pequenos (o maior é o Markdown de um relatório para virar documento).
+app.use(express.json({ limit: '2mb' }));
 
 app.post('/api/auth/login', handleLogin);
 app.post('/api/auth/password', handlePassword);
@@ -141,6 +166,12 @@ app.post('/api/voice/speak', express.json({ limit: '16kb' }), async (req, res) =
 // ============ Base de conhecimento, identidade visual e documentos ============
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 1 } });
+// Só os formatos que a base usa: documento (PDF, texto) e imagem (logo/molde). HTML, scripts e
+// executáveis são recusados no envio.
+const TIPO_POR_EXT: Record<string, string> = {
+  pdf: 'application/pdf', txt: 'text/plain; charset=utf-8', md: 'text/plain; charset=utf-8', csv: 'text/plain; charset=utf-8', log: 'text/plain; charset=utf-8',
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml',
+};
 const TIPOS_KB = new Set(['documento', 'molde', 'logo', 'imagem']);
 const podeEditarBase = (role?: string) => ['administrador', 'analista'].includes(String(role || 'administrador'));
 
@@ -155,6 +186,8 @@ app.post('/api/kb', upload.single('arquivo'), async (req, res) => {
   if (!TIPOS_KB.has(tipo)) return res.status(400).json({ error: 'Tipo inválido (documento, molde, logo ou imagem).' });
   // Nome do arquivo vem em latin1 no multipart; corrige acentos.
   const nome = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
+  const ext = path.extname(nome).slice(1).toLowerCase();
+  if (!TIPO_POR_EXT[ext]) return res.status(400).json({ error: 'Formato não aceito. Envie PDF, TXT, MD, CSV ou imagem (PNG, JPG, WEBP, GIF, SVG).' });
   try {
     const doc = await kbAdicionar(req.file.buffer, nome, req.file.mimetype, tipo as KbTipo);
     // Primeiro logo enviado vira o logo da identidade, com as cores dele.
@@ -183,7 +216,8 @@ app.delete('/api/kb/:id', (req, res) => {
 app.get('/api/kb/:id/arquivo', (req, res) => {
   const d = kbObter(req.params.id);
   if (!d || !existsSync(kbCaminho(d))) return res.status(404).json({ error: 'Arquivo não encontrado.' });
-  res.type(d.ext === 'svg' ? 'image/svg+xml' : d.mime || 'application/octet-stream');
+  // Tipo pela extensão aceita no envio, nunca pelo que o navegador de quem enviou declarou.
+  res.type(TIPO_POR_EXT[d.ext] ?? 'application/octet-stream');
   res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(d.nome)}"`);
   // SVG enviado não roda script: o navegador recebe com CSP sem scripts.
   res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'");
@@ -210,7 +244,7 @@ app.post('/api/documento', (req, res) => {
     markdown, moldeId: req.body?.moldeId || undefined, autor: u ? `Solicitado por ${u.display_name || u.username}` : undefined,
     kpis, status, periodo: req.body?.periodo ? txt(req.body.periodo, 120) : undefined,
   });
-  res.type('html').setHeader('Content-Security-Policy', "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'");
+  res.type('html').setHeader('Content-Security-Policy', "default-src 'none'; img-src data:; style-src 'unsafe-inline'");
   res.send(html);
 });
 

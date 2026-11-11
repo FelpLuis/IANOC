@@ -24,12 +24,18 @@ function cssDoApp(): string {
   }).join('\n');
 }
 
-export async function htmlDoDashboard(d: Dashboard): Promise<string> {
+/**
+ * `arquivo`: versão para baixar (.html aberto fora da NIA), com o botão de imprimir por
+ * script próprio. Na janela da NIA não vai script nenhum: o botão é ligado daqui (abrirDashboardExportado)
+ * e a CSP do próprio HTML bloqueia qualquer script que viesse nos dados.
+ */
+export async function htmlDoDashboard(d: Dashboard, arquivo = false): Promise<string> {
   const { renderToStaticMarkup } = await import('react-dom/server');
   const logo = await dataUrl('/brand/updown-internet-branco.png');
   const corpo = renderToStaticMarkup(createElement(DashboardBoard, { d, estatico: true, logoSrc: logo }));
   const titulo = `${d.titulo} — ${d.periodo}`;
-  return `<!doctype html><html lang="pt-BR" class="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  const csp = `default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src data:${arquivo ? "; script-src 'unsafe-inline'" : ''}`;
+  return `<!doctype html><html lang="pt-BR" class="dark"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(titulo)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link href="${FONTES}" rel="stylesheet">
 <style>${cssDoApp()}</style>
@@ -48,7 +54,7 @@ export async function htmlDoDashboard(d: Dashboard): Promise<string> {
     .dash-root { padding: 0 !important; }
   }
 </style></head><body>
-<div class="dash-acoes"><button onclick="window.print()">Imprimir / salvar PDF</button></div>
+<div class="dash-acoes"><button type="button" data-imprimir${arquivo ? ' onclick="window.print()"' : ''}>Imprimir / salvar PDF</button></div>
 <main class="dash-export">${corpo}</main>
 </body></html>`;
 }
@@ -63,12 +69,19 @@ export async function abrirDashboardExportado(d: Dashboard, imprimir = false) {
   win.document.write('<body style="background:#05021a;color:#9ba3c0;font:14px system-ui;padding:32px">Renderizando o dashboard…</body>');
   const html = await htmlDoDashboard(d);
   win.document.open();
-  win.document.write(imprimir ? html.replace('</body>', '<script>window.onload=()=>setTimeout(()=>window.print(),600)</script></body>') : html);
+  win.document.write(html);
   win.document.close();
+  ligarImpressao(win, imprimir);
+}
+
+/** Liga o botão de imprimir da janela exportada a partir daqui (a janela não roda script próprio). */
+export function ligarImpressao(win: Window, imprimirJa = false) {
+  win.document.querySelector('[data-imprimir]')?.addEventListener('click', () => win.print());
+  if (imprimirJa) setTimeout(() => win.print(), 900);
 }
 
 export async function baixarDashboard(d: Dashboard) {
-  const html = await htmlDoDashboard(d);
+  const html = await htmlDoDashboard(d, true);
   const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
   const a = document.createElement('a');
   a.href = url;

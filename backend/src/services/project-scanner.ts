@@ -5,7 +5,7 @@
 
 import { join, resolve, isAbsolute, basename } from 'path';
 import { statSync, readdirSync, existsSync } from 'fs';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID as uuidv4 } from 'node:crypto';
 import { scanDirectory, detectProjectType, createIgnoreFilter, ProjectConfig } from '../utils/file-utils.js';
 import { memory } from '../memory/memory-manager.js';
 import { ProjectInfo, FileInfo, ScanResult, ScanStats } from '../shared/types.js';

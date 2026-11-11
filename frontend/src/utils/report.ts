@@ -32,40 +32,6 @@ export function downloadMarkdown(markdown: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-/** Abre o relatório numa janela limpa e chama a impressão (o navegador oferece "Salvar como PDF"). */
-export function printReport(renderedHtml: string, markdown: string) {
-  const title = reportTitle(markdown).replace(/[<>&"]/g, (c) => `&#${c.charCodeAt(0)};`);
-  const win = window.open('', '_blank', 'width=900,height=1000');
-  if (!win) {
-    alert('O navegador bloqueou a janela de impressão. Libere pop-ups para este site.');
-    return;
-  }
-  const when = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'full', timeStyle: 'short', timeZone: 'America/Sao_Paulo' }).format(new Date());
-  win.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${title}</title>
-<style>
-  body { font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color: #111; margin: 32px; }
-  header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #1d4ed8; padding-bottom: 8px; margin-bottom: 16px; }
-  header strong { color: #1d4ed8; font-size: 15px; }
-  header span { color: #555; font-size: 12px; }
-  h1 { font-size: 20px; } h2 { font-size: 16px; margin-top: 20px; border-bottom: 1px solid #ddd; padding-bottom: 4px; } h3 { font-size: 14px; }
-  table { border-collapse: collapse; width: 100%; margin: 8px 0 14px; font-size: 12px; }
-  th, td { border: 1px solid #ccc; padding: 4px 8px; text-align: left; vertical-align: top; }
-  th { background: #eef2ff; }
-  tr:nth-child(even) td { background: #fafafa; }
-  pre, code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: #f4f4f5; }
-  pre { padding: 8px; white-space: pre-wrap; }
-  button { display: none; }
-  footer { margin-top: 24px; color: #777; font-size: 11px; border-top: 1px solid #ddd; padding-top: 6px; }
-  @media print { body { margin: 0; } h2 { break-after: avoid; } tr { break-inside: avoid; } }
-</style></head><body>
-<header><strong>UpDown Internet · NOC</strong><span>Gerado pelo IA NOC em ${when}</span></header>
-${renderedHtml}
-<footer>Dados consultados em tempo real nos sistemas do NOC (Zabbix, IXC, Opa! Suite e demais conectores). Somente leitura.</footer>
-<script>window.onload = () => { window.focus(); window.print(); };</script>
-</body></html>`);
-  win.document.close();
-}
-
 /**
  * Documento com a identidade visual (logo, cores, rodapé) e o molde padrão, gerado no
  * servidor. A janela abre no clique (para o navegador não bloquear) e recebe o HTML depois.
@@ -90,6 +56,8 @@ export async function abrirDocumento(markdown: string, dashboard?: Dashboard) {
     win.document.open();
     win.document.write(html);
     win.document.close();
+    // O documento não roda script (CSP no próprio HTML): o botão de imprimir é ligado daqui.
+    win.document.querySelector('[data-imprimir]')?.addEventListener('click', () => win.print());
   } catch (e) {
     win.document.body.innerHTML = `<p style="font:14px system-ui;padding:24px;color:#b91c1c">Não foi possível gerar o documento: ${String(e instanceof Error ? e.message : e).replace(/[<>&]/g, '')}</p>`;
   }

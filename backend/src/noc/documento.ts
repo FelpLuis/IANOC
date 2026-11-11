@@ -14,7 +14,33 @@
 import { existsSync, readFileSync, renameSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { marked } from 'marked';
+import { Marked } from 'marked';
+
+/**
+ * Markdown → HTML sem brecha para script: HTML cru é escapado (vira texto) e link/imagem só
+ * aceitam http(s), mailto, âncora ou imagem data: — nada de "javascript:".
+ */
+const escHtml = (s: string) => s.replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const urlSegura = (u: string, imagem = false) => {
+  const v = u.trim();
+  if (/^(https?:|mailto:)/i.test(v) || v.startsWith('#')) return v;
+  if (imagem && /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(v)) return v;
+  return '';
+};
+const mdSeguro = new Marked({
+  renderer: {
+    html({ text }) { return escHtml(text); },
+    link({ href, title, tokens }) {
+      const url = urlSegura(href);
+      const texto = this.parser.parseInline(tokens);
+      return url ? `<a href="${escHtml(url)}"${title ? ` title="${escHtml(title)}"` : ''} rel="noopener noreferrer">${texto}</a>` : texto;
+    },
+    image({ href, title, text }) {
+      const url = urlSegura(href, true);
+      return url ? `<img src="${escHtml(url)}" alt="${escHtml(text)}"${title ? ` title="${escHtml(title)}"` : ''}>` : escHtml(text);
+    },
+  },
+});
 import { caminhoArquivo, obter } from './kb.js';
 
 export interface Identidade {
@@ -156,7 +182,9 @@ export function gerarDocumento(opts: {
   const usarMolde = molde?.tipo === 'molde' && molde.secoes?.length;
   const base = usarMolde ? encaixarNoMolde(opts.markdown, molde!.secoes!) : (() => { const s = secoes(opts.markdown); return { titulo: s.titulo, corpo: opts.markdown.replace(/^#\s+.+\n?/, '') }; })();
   const titulo = base.titulo ?? (opts.markdown.match(/^#{1,3}\s+(.+)$/m)?.[1] ?? 'Documento NIA');
-  const html = marked.parse(base.corpo.replace(/\s\[(\d{1,2})\]/g, '<sup>[$1]</sup>'), { async: false }) as string;
+  // HTML cru no Markdown vira texto (o conteúdo pode vir da web, do modelo ou de um atendimento);
+  // só depois de renderizado as citações " [n]" viram <sup>.
+  const html = (mdSeguro.parse(base.corpo, { async: false }) as string).replace(/(\s)\[(\d{1,2})\]/g, '$1<sup>[$2]</sup>');
   const logo = logoDoTopo(id.logoId);
   const quando = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'long', timeStyle: 'short', timeZone: 'America/Sao_Paulo' }).format(new Date());
   const { primaria, secundaria, destaque } = id.cores;
@@ -168,7 +196,9 @@ export function gerarDocumento(opts: {
     : '';
   const logoHtml = !logo.src ? '' : logo.selo ? `<span class="selo"><img src="${logo.src}" alt="logo"></span>` : `<img src="${logo.src}" alt="logo">`;
 
-  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(titulo)}</title>
+  // A CSP vai também no próprio HTML: o navegador escreve o documento numa janela da NIA
+  // (document.write), onde o cabeçalho da resposta não vale. Nenhum script roda aqui.
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'"><title>${esc(titulo)}</title>
 <style>
   @page { size: A4; margin: 14mm 14mm 16mm; }
   * { box-sizing: border-box; }
@@ -225,7 +255,7 @@ export function gerarDocumento(opts: {
   .acoes button { background: linear-gradient(90deg, #12baea, ${primaria} 55%, ${destaque}); color: #fff; border: 0; border-radius: 10px; padding: 10px 16px; font: 600 10pt "Segoe UI", sans-serif; cursor: pointer; box-shadow: 0 8px 24px -8px ${primaria}; }
   @media print { .acoes { display: none; } .pagina { padding: 0; } }
 </style></head><body>
-<div class="acoes"><button onclick="window.print()">Imprimir / salvar PDF</button></div>
+<div class="acoes"><button type="button" data-imprimir>Imprimir / salvar PDF</button></div>
 <div class="pagina">
 <div class="topo">
   ${logoHtml}

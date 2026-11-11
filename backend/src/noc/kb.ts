@@ -126,8 +126,15 @@ async function lerPdf(buf: Buffer, molde: boolean) {
 
 /** Até 3 cores dominantes do logo (ignora fundo branco/preto e transparência). */
 async function coresDoLogo(buf: Buffer): Promise<string[]> {
+  // O sharp detecta o formato pelo conteúdo: um "logo.png" pode ser HEIF/TIFF disfarçado. Só passa
+  // PNG, JPEG, WEBP ou GIF de verdade (assinatura dos primeiros bytes).
+  const cab = buf.subarray(0, 12);
+  const assinaturaOk = cab.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47])) || cab.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))
+    || (cab.subarray(0, 4).toString('ascii') === 'RIFF' && cab.subarray(8, 12).toString('ascii') === 'WEBP') || cab.subarray(0, 4).toString('ascii') === 'GIF8';
+  if (!assinaturaOk) return [];
   const { default: sharp } = await import('sharp');
-  const { data, info } = await sharp(buf).ensureAlpha().resize(64, 64, { fit: 'inside' }).raw().toBuffer({ resolveWithObject: true });
+  // Imagem enviada por usuário: limite de 40 MP e só formatos comuns (nada de HEIF/TIFF exóticos).
+  const { data, info } = await sharp(buf, { limitInputPixels: 40_000_000, failOn: 'error' }).ensureAlpha().resize(64, 64, { fit: 'inside' }).raw().toBuffer({ resolveWithObject: true });
   const conta = new Map<string, number>();
   for (let i = 0; i < data.length; i += info.channels) {
     const [r, g, b, a] = [data[i], data[i + 1], data[i + 2], data[i + 3]];

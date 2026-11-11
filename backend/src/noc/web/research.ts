@@ -9,6 +9,8 @@
  *   estão em português.
  */
 
+import { lookup } from 'node:dns/promises';
+import { isIP, isIPv4 } from 'node:net';
 import { parseHTML } from 'linkedom';
 import { Readability } from '@mozilla/readability';
 
@@ -28,14 +30,65 @@ const BLOQUEADOS = /(youtube\.com|youtu\.be|facebook\.com|instagram\.com|tiktok\
 const limpa = (s: string) => s.replace(/\[(\d{1,3}|nota \d+|carece de fontes\??|citation needed)\]/gi, '').replace(/\s+/g, ' ').replace(/ /g, ' ').trim();
 const entidades = (s: string) => s.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/<[^>]+>/g, '');
 
+// ------------------------------------------------------------------ proteção contra SSRF
+
+/** Endereços que a NIA nunca busca: loopback, redes privadas, CGNAT, link-local, metadados, multicast. */
+export function ipInterno(ip: string): boolean {
+  if (isIPv4(ip)) {
+    const [a, b] = ip.split('.').map(Number);
+    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254)
+      || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 192 && b === 0) || (a === 198 && (b === 18 || b === 19)) || a >= 224;
+  }
+  const v = ip.toLowerCase();
+  if (v.startsWith('::ffff:')) return ipInterno(v.slice(7));
+  return v === '::' || v === '::1' || /^f[cd]/.test(v) || /^fe[89ab]/.test(v) || v.startsWith('ff') || v.startsWith('64:ff9b');
+}
+
+/**
+ * Só deixa buscar URL pública: http(s), portas 80/443, sem usuário/senha e com todos os IPs do
+ * nome fora das faixas internas. Sem isso, "gere um manual a partir de http://127.0.0.1:8080/…"
+ * faria o servidor ler os próprios serviços internos (SSRF).
+ */
+export async function urlPublica(endereco: string): Promise<URL> {
+  const url = new URL(endereco);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('só links http/https');
+  if (url.username || url.password) throw new Error('link com usuário/senha não é aceito');
+  if (url.port && url.port !== '80' && url.port !== '443') throw new Error('porta não permitida');
+  const host = url.hostname.replace(/^\[|\]$/g, '');
+  if (/^(localhost|.*\.local|.*\.internal|.*\.lan)$/i.test(host)) throw new Error('endereço interno bloqueado');
+  const ips = isIP(host) ? [host] : (await lookup(host, { all: true })).map((a) => a.address);
+  if (!ips.length || ips.some(ipInterno)) throw new Error('endereço interno bloqueado');
+  return url;
+}
+
 async function getText(url: string, ms = 10000, maxBytes = 2_000_000): Promise<{ html: string; type: string } | null> {
-  const r = await fetch(url, { headers: { 'User-Agent': UA, 'Accept-Language': 'pt-BR,pt;q=0.9' }, redirect: 'follow', signal: AbortSignal.timeout(ms) });
-  if (!r.ok) return null;
+  const sinal = AbortSignal.timeout(ms);
+  // Redirecionamentos um a um, conferindo cada destino (um site público pode redirecionar para dentro).
+  let atual = await urlPublica(url);
+  let r: Response | null = null;
+  for (let saltos = 0; saltos <= 4; saltos++) {
+    r = await fetch(atual, { headers: { 'User-Agent': UA, 'Accept-Language': 'pt-BR,pt;q=0.9' }, redirect: 'manual', signal: sinal });
+    const destino = r.status >= 300 && r.status < 400 ? r.headers.get('location') : null;
+    if (!destino) break;
+    await r.body?.cancel().catch(() => {});
+    atual = await urlPublica(new URL(destino, atual).href);
+    r = null;
+  }
+  if (!r || !r.ok) return null;
   const type = r.headers.get('content-type') || '';
-  if (!/html|json/.test(type)) return null;
-  const buf = Buffer.from(await r.arrayBuffer());
-  if (buf.length > maxBytes) return { html: buf.subarray(0, maxBytes).toString('utf8'), type };
-  return { html: buf.toString('utf8'), type };
+  if (!/html|json/.test(type)) { await r.body?.cancel().catch(() => {}); return null; }
+  // Lê no máximo maxBytes (página gigante não esgota a memória).
+  const partes: Buffer[] = [];
+  let total = 0;
+  const leitor = r.body?.getReader();
+  while (leitor) {
+    const { done, value } = await leitor.read();
+    if (done || !value) break;
+    partes.push(Buffer.from(value));
+    total += value.length;
+    if (total >= maxBytes) { await leitor.cancel().catch(() => {}); break; }
+  }
+  return { html: Buffer.concat(partes).subarray(0, maxBytes).toString('utf8'), type };
 }
 
 async function wikipedia(q: string, limite: number): Promise<SearchResult[]> {
