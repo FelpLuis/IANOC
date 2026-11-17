@@ -175,7 +175,7 @@ export async function extractDevices(tool: string, _input: unknown, raw: unknown
 
     if (tool === 'zabbix_problemas' && Array.isArray(data.problems)) return fromZabbixProblems(data.problems as Array<Record<string, unknown>>);
 
-    if (tool === 'acs_buscar_cpe' || tool === 'noc_gpon_clientes') {
+    if (tool === 'acs_buscar_cpe') {
       return listIn(data).slice(0, MAX_DEVICES).map(fromCpe).filter((d): d is DeviceCard => Boolean(d));
     }
     return [];

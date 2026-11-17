@@ -12,7 +12,6 @@ import { connectorEnabled, nocConfig, type ConnectorName } from './config.js';
 
 // Rankings dos relatórios: menores quando o modelo tem cota pequena por minuto (modo compacto).
 const topPadrao = () => (nocConfig.llm.provider !== 'anthropic' && nocConfig.openai.compactPrompt ? 5 : 15);
-import { nocGet } from './connectors/noc.js';
 import { docDevices, docZabbix, ifsDoEquipamento } from './connectors/doc.js';
 import { activeProblems, problemEventsReport, zabbixCall, zabbixInstanceNames } from './connectors/zabbix.js';
 import { deviceFaults, findDevices, pendingTasks } from './connectors/genieacs.js';
@@ -95,7 +94,7 @@ const TOOLS = [
   tool({
     name: 'backbone_topologia',
     connector: 'knowledge',
-    description: 'Topologia completa da rede para o painel 3D: equipamentos e enlaces cadastrados (NOC/topologia) + hosts de infraestrutura do Zabbix com o estado dos alarmes. Use quando pedirem a topologia, o mapa ou o desenho da rede/backbone.',
+    description: 'Topologia completa da rede para o painel 3D: equipamentos e enlaces da documentação do NOC + hosts de infraestrutura do Zabbix com o estado dos alarmes. Use quando pedirem a topologia, o mapa ou o desenho da rede/backbone.',
     schema: z.object({ incluir_zabbix: z.boolean().optional().describe('padrão true') }),
     run: ({ incluir_zabbix }) => buildTopology({ incluirZabbix: incluir_zabbix }),
   }),
@@ -193,114 +192,6 @@ const TOOLS = [
         .map((f) => ({ olt: d.name, pon: f.i.replace(/^gpon[-_]?(olt_)?/i, ''), status: f.st, onus: f.onus, rx_medio: f.rxm, sinal_baixo: f.low, pior_onu: f.worst, rx_modulo: f.rx, tx_modulo: f.tx })))
         .filter((l) => !apenas_problema || Number(l.sinal_baixo) > 0 || dbm(l.pior_onu) < -27 || /down/i.test(String(l.status)));
       return { zabbix_sincronizado: z.synced, ...limitList(linhas, n ?? 50) };
-    },
-  }),
-
-  // ------------------------------------------------------------ sistema NOC
-  tool({
-    name: 'noc_visao_geral',
-    connector: 'noc',
-    description: 'Visão geral do NOC (tela Home): clientes GPON online/offline, tráfego agregado e alertas ativos de tráfego/enlace.',
-    schema: z.object({ horas: z.number().int().min(1).max(168).optional() }),
-    run: ({ horas }) => nocGet('/api/home/overview', { horas }),
-  }),
-  tool({
-    name: 'noc_interfaces',
-    connector: 'noc',
-    description: 'Interfaces monitoradas pelo Zabbix (espelho do NOC): nome, ifAlias, status operacional, velocidade, RX/TX e utilização. Filtre sempre que possível.',
-    schema: z.object({
-      equipamento: z.string().optional().describe('id do equipamento na topologia'),
-      hostid: z.string().optional().describe('hostid do Zabbix'),
-      status: z.enum(['up', 'down']).optional(),
-      q: z.string().optional().describe('busca por nome/descrição da interface'),
-      conectadas: z.boolean().optional().describe('só interfaces com ifAlias (enlaces)'),
-    }),
-    run: ({ equipamento, hostid, status, q, conectadas }) =>
-      nocGet('/api/zabbix/interfaces', { equipamento, hostid, status, q, conectadas: conectadas ? 1 : undefined }),
-  }),
-  tool({
-    name: 'noc_enlaces',
-    connector: 'noc',
-    description: 'Enlaces derivados do Zabbix (ifAlias casados entre os dois lados), com status de cada ponta.',
-    schema: z.object({}),
-    run: () => nocGet('/api/zabbix/links'),
-  }),
-  tool({
-    name: 'noc_trafego',
-    connector: 'noc',
-    description: 'Painel de tráfego: interfaces saturadas, com erro ou down, e o histórico agregado (bps de entrada/saída) das últimas horas.',
-    schema: z.object({
-      horas: z.number().int().min(1).max(168).optional(),
-      tempo_real: z.boolean().optional().describe('lê o Zabbix ao vivo em vez do espelho do último ciclo'),
-    }),
-    run: ({ horas, tempo_real }) => nocGet('/api/zabbix/overview', { horas, realtime: tempo_real ? 1 : undefined }),
-  }),
-  tool({
-    name: 'noc_gpon_clientes',
-    connector: 'noc',
-    description: 'ONUs/clientes FTTH das OLTs ZTE (C300/C350) com o estado mais recente da coleta: status, sinal RX/TX (dBm), IP, velocidade, uptime. Busque por nome, serial, PON (ex.: "1/2/3"), login, OLT ou status (online, offline, los, dying-gasp...).',
-    schema: z.object({
-      busca: z.string().optional().describe('termos que devem aparecer no registro'),
-      apenas_problema: z.boolean().optional().describe('só ONUs fora do ar ou com sinal RX pior que -27 dBm'),
-      limite: limite(50),
-    }),
-    run: async ({ busca, apenas_problema, limite: n }) => {
-      const [inventario, estado] = await Promise.all([nocGet('/api/gpon/clients'), nocGet('/api/gpon/status')]);
-      const status = new Map(asArray(estado, 'clients').map((s) => [String(s.id), s]));
-      let clientes = asArray(inventario, 'clients', 'clientes').map((c) => ({ ...c, ...(status.get(String(c.id)) ?? {}) }));
-      if (apenas_problema) {
-        clientes = clientes.filter((c) => {
-          const rx = Number(c.rx_power);
-          return !/^online$/i.test(String(c.status ?? '')) || (Number.isFinite(rx) && rx < -27);
-        });
-      }
-      const filtrados = clientes.filter((c) => matchesQuery(c, busca));
-      const porStatus: Record<string, number> = {};
-      for (const c of clientes) { const s = String(c.status ?? 'desconhecido'); porStatus[s] = (porStatus[s] || 0) + 1; }
-      return { por_status: porStatus, ...limitList(filtrados, n ?? 50) };
-    },
-  }),
-  tool({
-    name: 'noc_gpon_historico',
-    connector: 'noc',
-    description: 'Linha do tempo de transições de estado das ONUs (quando caiu, quantas vezes oscilou, sinal antes/depois). Sem client_id traz as últimas transições do parque inteiro — bom para detectar queda em massa numa PON/CTO.',
-    schema: z.object({
-      client_id: z.string().optional(),
-      desde: z.string().optional().describe('ISO 8601, ex.: 2026-09-22T08:00:00-03:00'),
-      evento: z.string().optional(),
-      limite: limite(50),
-    }),
-    run: ({ client_id, desde, evento, limite: n }) => nocGet('/api/gpon/history', { client_id, since: desde, event: evento, limit: n }),
-  }),
-  tool({
-    name: 'noc_radius_logs',
-    connector: 'noc',
-    description: 'Log de autenticação PPPoE (RADIUS): conexões e desconexões por cliente/login, com motivo.',
-    schema: z.object({
-      client_id: z.string().optional(),
-      username: z.string().optional().describe('login PPPoE exato'),
-      desde: z.string().optional().describe('ISO 8601'),
-      status: z.string().optional(),
-      limite: limite(100),
-    }),
-    run: ({ client_id, username, desde, status, limite: n }) =>
-      nocGet('/api/radius/logs', { client_id, username, since: desde, status, limit: n }),
-  }),
-  tool({
-    name: 'noc_clientes',
-    connector: 'noc',
-    description: 'Cadastro de clientes sincronizado do IXC dentro do NOC (nome, contrato, login, endereço, coordenadas, ONU vinculada).',
-    schema: z.object({ q: z.string().describe('nome, login, contrato ou endereço') }),
-    run: ({ q }) => nocGet('/api/clientes', { q }),
-  }),
-  tool({
-    name: 'noc_tickets',
-    connector: 'noc',
-    description: 'Chamados/tickets registrados no NOC.',
-    schema: z.object({ busca: z.string().optional(), limite: limite(30) }),
-    run: async ({ busca, limite: n }) => {
-      const tickets = asArray(await nocGet('/api/tickets'), 'tickets');
-      return limitList(tickets.filter((t) => matchesQuery(t, busca)), n ?? 30);
     },
   }),
 
@@ -465,7 +356,7 @@ export function availableTools(): Anthropic.Beta.Messages.BetaTool[] {
 }
 
 export function connectorStatus() {
-  const nomes: Array<ConnectorName> = ['doc', 'noc', 'zabbix', 'genieacs', 'ixc', 'opa'];
+  const nomes: Array<ConnectorName> = ['doc', 'zabbix', 'genieacs', 'ixc', 'opa'];
   return Object.fromEntries(nomes.map((n) => [n, connectorEnabled(n)]));
 }
 

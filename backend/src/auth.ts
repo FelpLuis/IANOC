@@ -1,13 +1,13 @@
 /**
- * Login do assistente com o usuário e a senha do sistema NOC (sistema.updown.com.br).
+ * Login do assistente com o usuário e a senha do Portal NOC (portal.updown.com.br, NOC_AUTH_URL).
  *
- * O NOC valida a senha e devolve um token de sessão; aqui fica só um id de
+ * O portal valida a senha e devolve um token de sessão; aqui fica só um id de
  * sessão aleatório em cookie HttpOnly, apontando para esse token. A cada
- * poucos minutos a sessão é reconferida no /api/auth/me do NOC — usuário
+ * poucos minutos a sessão é reconferida no /api/auth/me do portal — usuário
  * desativado lá perde o acesso aqui.
  *
  * IANOC_AUTH=noc liga (padrão em produção); IANOC_AUTH=local aceita só o usuário de
- * IANOC_ADMIN_USER (ex.: NOC), sem login do sistema NOC; IANOC_AUTH=off desliga (desenvolvimento).
+ * IANOC_ADMIN_USER (ex.: NOC), sem login do Portal NOC; IANOC_AUTH=off desliga (desenvolvimento).
  *
  * Usuários locais (local-users.ts, ex.: administrador master) são conferidos antes do NOC.
  * Com troca de senha pendente, a sessão só acessa /api/auth/* até a senha ser trocada.
@@ -33,7 +33,7 @@ const ALLOWED_ROLES = (process.env.IANOC_ALLOWED_ROLES || 'administrador,analist
 
 const AUTH_MODE = (process.env.IANOC_AUTH || (process.env.NODE_ENV === 'production' ? 'noc' : 'off')).trim().toLowerCase();
 export const authEnabled = AUTH_MODE !== 'off';
-// IANOC_AUTH=local: só o usuário de IANOC_ADMIN_USER entra (ex.: NOC); o login do sistema NOC
+// IANOC_AUTH=local: só o usuário de IANOC_ADMIN_USER entra (ex.: NOC); o login do Portal NOC
 // e os demais usuários locais ficam desligados.
 const SOMENTE_ADMIN = AUTH_MODE === 'local';
 const ADMIN_USER = (process.env.IANOC_ADMIN_USER || '').trim().toLowerCase();
@@ -211,7 +211,7 @@ export async function handleLogin(req: Request, res: Response) {
     status = r.status;
     data = (await r.json().catch(() => ({}))) as typeof data;
   } catch {
-    return res.status(502).json({ error: 'Não foi possível falar com o sistema NOC para validar o login.' });
+    return res.status(502).json({ error: 'Não foi possível falar com o Portal NOC para validar o login.' });
   }
 
   if (status === 429) return res.status(429).json({ error: 'O NOC bloqueou novas tentativas para este usuário. Aguarde 15 minutos.' });
@@ -221,7 +221,7 @@ export async function handleLogin(req: Request, res: Response) {
     return res.status(401).json({ error: 'Usuário ou senha inválidos.' });
   }
   if (data.user.must_change_password) {
-    return res.status(403).json({ error: 'Troque sua senha no sistema NOC antes de usar o assistente.' });
+    return res.status(403).json({ error: 'Troque sua senha no Portal NOC antes de usar o assistente.' });
   }
   const role = String(data.user.role || '').toLowerCase();
   if (!ALLOWED_ROLES.includes(role)) {
@@ -251,7 +251,7 @@ export async function handlePassword(req: Request, res: Response) {
   const id = readCookie(req.headers.cookie, COOKIE);
   const s = await sessionRecord(req.headers.cookie);
   if (!id || !s) return res.status(401).json({ error: 'AUTH_REQUIRED' });
-  if (!s.local) return res.status(400).json({ error: 'Troque a senha no sistema NOC.' });
+  if (!s.local) return res.status(400).json({ error: 'Troque a senha no Portal NOC.' });
   if (senhaFixa && s.user.username.toLowerCase() === ADMIN_USER) return res.status(400).json({ error: 'A senha deste usuário é fixa (definida no servidor).' });
   if (tooManyAttempts(`senha:${ipDe(req)}`)) return res.status(429).json({ error: 'Muitas tentativas. Aguarde 15 minutos.' });
   const atual = String(req.body?.current || '');

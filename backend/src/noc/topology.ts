@@ -1,6 +1,6 @@
 /**
- * Topologia da rede para o painel 3D: junta o backbone cadastrado (sistema NOC ou
- * sementes da topologia) com os hosts de infraestrutura do Zabbix e o estado dos
+ * Topologia da rede para o painel 3D: junta o backbone cadastrado (documentação do NOC
+ * ou sementes da topologia) com os hosts de infraestrutura do Zabbix e o estado dos
  * alarmes ativos.
  *
  * - Equipamento cadastrado + enlaces cadastrados: exatos.

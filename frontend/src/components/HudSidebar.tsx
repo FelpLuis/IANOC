@@ -20,7 +20,7 @@ const SYSTEMS: Array<[string, string]> = [
   ['zabbix', 'Zabbix'],
   ['ixc', 'IXC Soft'],
   ['opa', 'Opa! Suite'],
-  ['noc', 'Sistema NOC'],
+  ['doc', 'Documentação NOC'],
   ['genieacs', 'GenieACS'],
 ];
 

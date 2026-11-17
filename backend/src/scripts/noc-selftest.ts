@@ -18,7 +18,10 @@ const checks: Array<[string, unknown]> = [
   ['ftth_buscar', { termo: 'seaborn' }],
   ['ftth_proximos', { lat: -24.034339, lon: -46.49292, raio_m: 800, limite: 3 }],
 ];
-if (connectorStatus().noc) checks.push(['noc_visao_geral', {}]);
+if (connectorStatus().doc) {
+  checks.push(['doc_equipamentos', { limite: 3 }]);
+  checks.push(['doc_pon', { apenas_problema: true, limite: 3 }]);
+}
 const ontem = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
 if (connectorStatus().zabbix) {
   checks.push(['zabbix_problemas', { severidade_minima: 4, limite: 5 }]);

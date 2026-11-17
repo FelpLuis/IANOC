@@ -2,9 +2,8 @@
  * Base de conhecimento do backbone e da rede FTTH.
  *
  * Fonte, em ordem de preferência:
- *   1. /api/topology do sistema NOC (sistema.updown.com.br, recortes "noc" e "isp") — é o que a equipe edita;
- *   1b. Documentação de equipamentos (documentacao.noc.updown.com.br), opcional, quando o
- *       sistema NOC não está configurado ou não responde; os enlaces saem das descrições das portas;
+ *   1. Documentação de equipamentos do NOC (documentacao.noc.updown.com.br) — é o que a equipe
+ *      edita; os enlaces saem das descrições das portas e o estado vem do espelho do Zabbix dela;
  *   2. sementes em Topologia-NOC.github.io/public/data (geradas do KMZ do backbone);
  *   3. documentos Markdown em ianoc-agent/knowledge/ — o conhecimento que não
  *      está em sistema nenhum (VLANs, procedimentos, contatos de operadora).
@@ -15,7 +14,6 @@
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { connectorEnabled, nocConfig } from './config.js';
-import { nocGet } from './connectors/noc.js';
 import { docDevices, docZabbix, ifsDoEquipamento, type DocDevice, type DocZabbix } from './connectors/doc.js';
 import { matchesQuery, normalize } from './http.js';
 
@@ -81,20 +79,8 @@ export async function getKnowledge(force = false): Promise<Knowledge> {
   ]);
 
   let noc: TopologyPayload | null = null;
-  let isp: TopologyPayload | null = null;
   let fonte = `sementes locais (${nocConfig.knowledge.topologiaDataDir})`;
-  if (connectorEnabled('noc')) {
-    try {
-      [noc, isp] = await Promise.all([
-        nocGet<TopologyPayload>('/api/topology', { scope: 'noc' }),
-        nocGet<TopologyPayload>('/api/topology', { scope: 'isp' }),
-      ]);
-      fonte = `NOC ao vivo (${nocConfig.noc.baseUrl}/api/topology)`;
-    } catch (error) {
-      console.warn('[knowledge] topologia do NOC indisponível, usando sementes:', error instanceof Error ? error.message : error);
-    }
-  }
-  if (!noc && connectorEnabled('doc')) {
+  if (connectorEnabled('doc')) {
     try {
       const [devices, zbx] = await Promise.all([docDevices(true), docZabbix(true).catch(() => null)]);
       if (devices.length) {
@@ -102,7 +88,7 @@ export async function getKnowledge(force = false): Promise<Knowledge> {
         fonte = `Documentação do NOC (${nocConfig.doc.baseUrl})${zbx?.synced ? `, Zabbix sincronizado em ${zbx.synced}` : ''}`;
       }
     } catch (error) {
-      console.warn('[knowledge] documentação indisponível:', error instanceof Error ? error.message : error);
+      console.warn('[knowledge] documentação indisponível, usando sementes:', error instanceof Error ? error.message : error);
     }
   }
 
@@ -111,11 +97,11 @@ export async function getKnowledge(force = false): Promise<Knowledge> {
     fonte,
     carregadoEm: new Date().toISOString(),
     equipamentos: nonEmpty(noc?.equipamentos, seedEquip),
-    conexoes: noc?.conexoes && fonte.startsWith('Documentação') ? noc.conexoes : nonEmpty(noc?.conexoes, seedConex),
+    conexoes: noc ? noc.conexoes ?? [] : seedConex,
     pops: nonEmpty(noc?.pops, seedPops),
-    ispPops: nonEmpty(isp?.pops, seedIspPops),
-    caixas: nonEmpty(isp?.caixas, seedCaixas),
-    fibras: nonEmpty(isp?.fibras, seedFibras),
+    ispPops: seedIspPops,
+    caixas: seedCaixas,
+    fibras: seedFibras,
     documentos,
   };
   loadedAt = Date.now();
