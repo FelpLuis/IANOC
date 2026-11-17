@@ -85,9 +85,9 @@ export const nocConfig = {
   /** Sistema NOC (Topologia) — sistema.updown.com.br. Proxy de Zabbix, GPON/OLT, RADIUS e clientes do IXC. */
   noc: {
     baseUrl: stripSlash(env('NOC_API_URL')),
-    // Login dos usuários do assistente: Portal NOC (SSO). Vazio = o próprio NOC_API_URL.
+    // Login dos usuários do assistente: Portal NOC (SSO) — mesmo usuário e senha do portal.
     // Ex.: https://portal.updown.com.br/sso/ianoc
-    authUrl: stripSlash(env('NOC_AUTH_URL')) || stripSlash(env('NOC_API_URL')),
+    authUrl: stripSlash(env('NOC_AUTH_URL')) || 'https://portal.updown.com.br/sso/ianoc',
     // Token de sessão fixo OU usuário de serviço (o assistente faz login e renova sozinho).
     token: env('NOC_API_TOKEN'),
     username: env('NOC_API_USER'),
