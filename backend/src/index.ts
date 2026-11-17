@@ -685,7 +685,7 @@ async function startServer() {
   server.listen(PORT, HOST, () => {
     warmKokoro();
     console.log(`🚀 IA NOC Agent server running on http://${HOST}:${PORT}`);
-    console.log(`🔐 Login: ${authEnabled ? `usuário do NOC (${nocConfig.noc.baseUrl || 'NOC_API_URL não configurado!'})` : 'DESLIGADO (IANOC_AUTH=off)'}`);
+    console.log(`🔐 Login: ${authEnabled ? `Portal NOC (${nocConfig.noc.authUrl || 'NOC_AUTH_URL não configurado!'})` : 'DESLIGADO (IANOC_AUTH=off)'}`);
     console.log(`🛡️  IPs liberados: ${process.env.IANOC_ALLOWED_IPS || 'qualquer um'}${acessoPublico ? ' · HTTPS aberto para qualquer rede (IANOC_ACESSO_PUBLICO)' : ''}`);
     console.log(`🗂️  Varredura de projetos: ${PROJECT_TOOLS ? 'ligada' : 'desligada'}`);
     console.log(`📡 WebSocket server ready`);

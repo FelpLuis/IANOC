@@ -453,6 +453,7 @@ const webZabbix = () => { const z = nocConfig.zabbix[0]?.url; return z ? z.repla
 const webIxc = () => { const o = origem(nocConfig.ixc.baseUrl); return o ? `${o}/adm.php` : undefined; };
 const webOpa = () => { const o = origem(nocConfig.opa.baseUrl); return o ? `${o}/atendente/` : undefined; };
 const webNoc = () => origem(nocConfig.noc.baseUrl);
+const webDoc = () => origem(nocConfig.doc.baseUrl);
 
 /**
  * "Abre o Zabbix", "abre o IXC e o Opa", "abre o mapa da CTO 366", "pesquisa X no Google",
@@ -482,7 +483,8 @@ async function abrir(t: Turn, q: Parsed): Promise<string> {
   }
   if (/\bixc\b/.test(tx)) { const u = webIxc(); if (u) alvos.push({ url: u, label: 'IXC' }); }
   if (/\bopa\b/.test(tx)) { const u = webOpa(); if (u) alvos.push({ url: u, label: 'Opa! Suite' }); }
-  if (/\bsistema( do)? noc\b|\bpainel( do)? noc\b|\bnoc\b/.test(tx) && !/\bzabbix\b/.test(tx)) { const u = webNoc(); if (u) alvos.push({ url: u, label: 'Sistema NOC' }); }
+  if (/\bdocumenta(cao|ção)\b|\brack/.test(tx)) { const u = webDoc(); if (u) alvos.push({ url: u, label: 'Documentação do NOC' }); }
+  else if (/\bsistema( do)? noc\b|\bpainel( do)? noc\b|\bnoc\b/.test(tx) && !/\bzabbix\b/.test(tx)) { const u = webNoc() ?? webDoc(); if (u) alvos.push({ url: u, label: webNoc() ? 'Sistema NOC' : 'Documentação do NOC' }); }
   if (q.caixa || /\b(cto|ceo|caixa)\b/.test(tx)) {
     const termo = q.caixa ?? q.original.replace(/^.*?\b(cto|ceo|caixa)\b/i, '$1').replace(/[?!.]+$/, '');
     const r = await t.call<{ caixas?: Array<{ nome: string; lat?: number; lon?: number }> }>('ftth_buscar', { termo, tipo: 'caixa' });
@@ -679,7 +681,15 @@ async function onus(t: Turn, q: Parsed): Promise<string> {
         table(['Cliente/ONU', 'OLT', 'PON', 'Status', 'RX (dBm)', 'TX (dBm)'], items.slice(0, 25).map((c) => [c.name ?? c.nome ?? c.serial, c.olt, c.pon, c.status, c.rx_power, c.tx_power]))].join('\n\n');
     }
   }
-  // Sem o sistema NOC: alarmes de cliente no Zabbix (LOS, energia, sinal).
+  // Sem o sistema NOC: resumo das PONs pela documentação + alarmes de cliente no Zabbix.
+  let ponTxt = '';
+  if (on('doc')) {
+    const p = await t.call<{ total: number; zabbix_sincronizado?: string; items: Rec[] }>('doc_pon', { apenas_problema: true, limite: 30 });
+    if (p.ok && (p.data.items ?? []).length) {
+      ponTxt = [`PONs com sinal ruim pela documentação (Zabbix de ${p.data.zabbix_sincronizado ?? '—'}):`,
+        table(['OLT', 'PON', 'ONUs', 'Sinal baixo', 'RX médio', 'Pior ONU'], (p.data.items ?? []).slice(0, 20).map((l) => [l.olt, l.pon, l.onus, l.sinal_baixo, l.rx_medio, l.pior_onu]))].join('\n\n');
+    }
+  }
   const r = await t.call<{ problems: Problem[] }>('zabbix_problemas', { severidade_minima: 2, limite: 300, ...(busca ? { host: busca } : {}) });
   if (!r.ok) return `Não consegui consultar as ONUs: ${r.text}`;
   const ps = (r.data.problems ?? []).filter((p) => /\blos\b|sinal|dbm|onu|ont|energia|desconect|dying/i.test(p.problema));
@@ -689,7 +699,8 @@ async function onus(t: Turn, q: Parsed): Promise<string> {
     ps.length ? `O Zabbix mostra ${plural(ps.length, 'cliente/ONU com problema', 'clientes/ONUs com problema')} agora.` : 'Nenhuma ONU com alarme no Zabbix agora.',
     ps.length ? counts(causas, 'Causa') : '',
     ps.length ? table(['Cliente', 'Problema', 'Severidade', 'Desde'], ps.slice(0, 20).map((p) => [p.host, cut(p.problema, 80), p.severidade, p.desde])) : '',
-    on('noc') ? '' : '_O sinal RX/TX das ONUs vem do sistema NOC, que não está configurado neste servidor; mostrei os alarmes do Zabbix._',
+    ponTxt,
+    on('noc') || on('doc') ? '' : '_O sinal das PONs vem da documentação do NOC, que não está configurada neste servidor; mostrei os alarmes do Zabbix._',
   ].filter(Boolean).join('\n\n');
 }
 

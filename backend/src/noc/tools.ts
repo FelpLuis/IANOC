@@ -13,6 +13,7 @@ import { connectorEnabled, nocConfig, type ConnectorName } from './config.js';
 // Rankings dos relatórios: menores quando o modelo tem cota pequena por minuto (modo compacto).
 const topPadrao = () => (nocConfig.llm.provider !== 'anthropic' && nocConfig.openai.compactPrompt ? 5 : 15);
 import { nocGet } from './connectors/noc.js';
+import { docDevices, docZabbix, ifsDoEquipamento } from './connectors/doc.js';
 import { activeProblems, problemEventsReport, zabbixCall, zabbixInstanceNames } from './connectors/zabbix.js';
 import { deviceFaults, findDevices, pendingTasks } from './connectors/genieacs.js';
 import { IXC_OPERATORS, IXC_RESOURCES, ixcClientesPorPlano, ixcList, ixcOsResumo } from './connectors/ixc.js';
@@ -120,6 +121,79 @@ const TOOLS = [
       limite: limite(15, 100),
     }),
     run: async ({ lat, lon, raio_m, limite: n }) => nearFtth(await getKnowledge(), lat, lon, raio_m ?? 500, n ?? 15),
+  }),
+
+  // ------------------------------------------------------------ Documentação do NOC (documentacao.noc.updown.com.br)
+  tool({
+    name: 'doc_equipamentos',
+    connector: 'doc',
+    description: 'Documentação de equipamentos do NOC: equipamento, modelo, site/POP, rack, função, IP de gerência, observações e hosts do Zabbix ligados. Busque por nome, site, modelo, função ou IP.',
+    schema: z.object({ busca: z.string().optional(), limite: limite(30, 200) }),
+    run: async ({ busca, limite: n }) => {
+      const devs = (await docDevices()).map(({ ports, ...d }) => ({ ...d, portas: ports?.length ?? 0 }));
+      return limitList(devs.filter((d) => matchesQuery(d, busca)), n ?? 30);
+    },
+  }),
+  tool({
+    name: 'doc_interfaces',
+    connector: 'doc',
+    description: 'Portas/interfaces documentadas de um equipamento com o estado do Zabbix (status UP/DOWN, velocidade, RX/TX óptico em dBm, bits de entrada/saída e, nas PONs das OLTs, ONUs, RX médio, ONUs com sinal baixo e pior ONU). Filtre por equipamento e, se quiser, por texto ou status.',
+    schema: z.object({
+      equipamento: z.string().optional().describe('nome ou id do equipamento (ex.: "F1A CENTRAL", "OLT C300")'),
+      q: z.string().optional().describe('texto na interface ou descrição (ex.: "100GE0/1/48", "PRAIA GRANDE")'),
+      status: z.enum(['up', 'down']).optional(),
+      apenas_problema: z.boolean().optional().describe('só portas documentadas que estão DOWN/PARCIAL ou com sinal pior que -27 dBm'),
+      limite: limite(80, 500),
+    }),
+    run: async ({ equipamento, q, status, apenas_problema, limite: n }) => {
+      const [devs, z] = await Promise.all([docDevices(), docZabbix()]);
+      const alvo = equipamento ? devs.filter((d) => matchesQuery({ id: d.id, nome: d.name }, equipamento)) : devs;
+      if (equipamento && !alvo.length) return { erro: `equipamento "${equipamento}" não está na documentação` };
+      const linhas = alvo.flatMap((d) => {
+        const ifs = ifsDoEquipamento(d, z);
+        return (d.ports ?? []).map((p) => {
+          const zi = ifs.get(p.i);
+          return {
+            equipamento: d.name, interface: p.i, descricao: p.d, servico: p.s, observacao: p.o,
+            status_doc: p.st, status_zabbix: zi?.st, velocidade: zi?.sp, rx_dbm: zi?.rx, tx_dbm: zi?.tx,
+            entrada_bps: zi?.in, saida_bps: zi?.out, onus: zi?.onus, rx_medio_onus: zi?.rxm, onus_sinal_baixo: zi?.low, pior_onu: zi?.worst,
+          };
+        });
+      });
+      const dbm = (v: unknown) => Number(String(v ?? '').replace(',', '.').replace(/[^-\d.]/g, ''));
+      const filtradas = linhas.filter((l) => {
+        const st = String(l.status_zabbix || l.status_doc || '').toLowerCase();
+        if (status && st !== status) return false;
+        if (apenas_problema) {
+          const usada = l.descricao && !/^\?\?$|interface em down|reserva|livre/i.test(String(l.descricao));
+          const rx = dbm(l.rx_dbm);
+          if (!(usada && (/down|parcial/.test(st) || (Number.isFinite(rx) && rx < -27)))) return false;
+        }
+        return matchesQuery({ i: l.interface, d: l.descricao, s: l.servico }, q);
+      });
+      return { zabbix_sincronizado: z.synced, ...(z.erro ? { erro_zabbix: z.erro } : {}), ...limitList(filtradas, n ?? 80) };
+    },
+  }),
+  tool({
+    name: 'doc_pon',
+    connector: 'doc',
+    description: 'Resumo das PONs das OLTs pela documentação + Zabbix: ONUs por PON, RX médio, ONUs com sinal baixo e pior ONU. Use para "qual PON está com sinal ruim?" ou "como está a PON 1/2/3 da C300?".',
+    schema: z.object({
+      olt: z.string().optional().describe('nome da OLT (ex.: "C300", "C350")'),
+      pon: z.string().optional().describe('posição da PON, ex.: "1/2/3"'),
+      apenas_problema: z.boolean().optional().describe('só PONs com ONUs de sinal baixo, pior ONU < -27 dBm ou porta DOWN'),
+      limite: limite(50, 300),
+    }),
+    run: async ({ olt, pon, apenas_problema, limite: n }) => {
+      const [devs, z] = await Promise.all([docDevices(), docZabbix()]);
+      const olts = devs.filter((d) => /olt/i.test(`${d.role} ${d.name}`) && (!olt || matchesQuery({ n: d.name }, olt)));
+      const dbm = (v: unknown) => Number(String(v ?? '').replace(',', '.').replace(/[^-\d.]/g, ''));
+      const linhas = olts.flatMap((d) => [...ifsDoEquipamento(d, z).values()]
+        .filter((f) => /^gpon/i.test(f.i) && (!pon || f.i.endsWith(`_${pon}`) || f.i.includes(pon)))
+        .map((f) => ({ olt: d.name, pon: f.i.replace(/^gpon[-_]?(olt_)?/i, ''), status: f.st, onus: f.onus, rx_medio: f.rxm, sinal_baixo: f.low, pior_onu: f.worst, rx_modulo: f.rx, tx_modulo: f.tx })))
+        .filter((l) => !apenas_problema || Number(l.sinal_baixo) > 0 || dbm(l.pior_onu) < -27 || /down/i.test(String(l.status)));
+      return { zabbix_sincronizado: z.synced, ...limitList(linhas, n ?? 50) };
+    },
   }),
 
   // ------------------------------------------------------------ sistema NOC
@@ -391,7 +465,7 @@ export function availableTools(): Anthropic.Beta.Messages.BetaTool[] {
 }
 
 export function connectorStatus() {
-  const nomes: Array<ConnectorName> = ['noc', 'zabbix', 'genieacs', 'ixc', 'opa'];
+  const nomes: Array<ConnectorName> = ['doc', 'noc', 'zabbix', 'genieacs', 'ixc', 'opa'];
   return Object.fromEntries(nomes.map((n) => [n, connectorEnabled(n)]));
 }
 

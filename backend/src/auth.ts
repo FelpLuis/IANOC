@@ -124,7 +124,7 @@ const ipDe = (req: Request) => clientIp(req.socket.remoteAddress, req.headers['x
 // ---------------------------------------------------------------- NOC
 
 async function nocFetch(path: string, init: RequestInit = {}) {
-  return fetch(`${nocConfig.noc.baseUrl}${path}`, { ...init, signal: AbortSignal.timeout(15000) });
+  return fetch(`${nocConfig.noc.authUrl}${path}`, { ...init, signal: AbortSignal.timeout(15000) });
 }
 
 function readCookie(header: string | undefined, name: string) {
@@ -198,7 +198,7 @@ export async function handleLogin(req: Request, res: Response) {
     return res.json({ ok: true, user, mustChangePassword: local.user.mustChange });
   }
 
-  if (SOMENTE_ADMIN || !nocConfig.noc.baseUrl) return res.status(401).json({ error: 'Usuário ou senha inválidos.' });
+  if (SOMENTE_ADMIN || !nocConfig.noc.authUrl) return res.status(401).json({ error: 'Usuário ou senha inválidos.' });
 
   let data: { token?: string; user?: SessionUser & { must_change_password?: boolean }; error?: string };
   let status: number;

@@ -61,6 +61,8 @@ e onde fazer, e um humano executa.
 | Ambiente | O que o assistente consulta | Variáveis em `backend/.env` |
 |---|---|---|
 | Sistema NOC (sistema.updown.com.br) | topologia, interfaces/tráfego/enlaces do Zabbix, ONUs das OLTs ZTE C300/C350 com sinal RX/TX, histórico GPON, log RADIUS, clientes do IXC, tickets | `NOC_API_URL`, `NOC_API_USER`, `NOC_API_PASSWORD` |
+| Portal NOC (portal.updown.com.br) | login dos usuários do assistente — mesmo usuário e senha do portal | `NOC_AUTH_URL` |
+| Documentação do NOC (opcional) | equipamentos, portas, racks, sinal óptico e resumo das PONs (ferramentas `doc_*`); reserva do backbone se o sistema NOC não responder | `DOC_API_URL`, `DOC_AUTH`, `DOC_LOGIN_URL`, `DOC_API_USER`, `DOC_API_PASSWORD` |
 | Zabbix (até 3 instâncias) | alarmes ativos, relatório de eventos de um período (hosts que mais caíram, tempo em problema, recorrências) e qualquer consulta `.get` | `ZABBIX_URL` + `ZABBIX_TOKEN` ou `ZABBIX_USER`/`ZABBIX_PASSWORD`; `ZABBIX2_*`, `ZABBIX3_*` |
 | GenieACS (TR-069) | CPE por serial/PPPoE, último inform, WAN, Wi-Fi, falhas, tarefas pendentes | `GENIEACS_NBI_URL` |
 | IXC Soft | cliente, contrato, login PPPoE, O.S., financeiro (CPF/CNPJ mascarados), relatório de O.S. por período | `IXC_BASE_URL`, `IXC_API_TOKEN` |

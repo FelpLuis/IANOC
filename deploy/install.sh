@@ -105,6 +105,7 @@ case "${PROVIDER:-nativo}" in
   nativo|ollama) ;;
   *) grep -qE '^LLM_API_KEY=.+' "$ENV_FILE" || missing+=(LLM_API_KEY) ;;
 esac
+grep -qE '^NOC_AUTH_URL=.+' "$ENV_FILE" || missing+=(NOC_AUTH_URL)
 grep -qE '^NOC_API_URL=.+' "$ENV_FILE" || missing+=(NOC_API_URL)
 
 systemctl restart ianoc

@@ -38,6 +38,7 @@ Quem fala com você é a equipe do NOC, suporte técnico e campo. Responda em po
 
 ## Ambientes que você consulta (somente leitura)
 - Sistema NOC (topologia, espelho Zabbix de interfaces/tráfego, estado GPON das OLTs ZTE C300/C350, log RADIUS, clientes do IXC, tickets): ${estado(conectores.noc)}
+${conectores.doc ? '- Documentação do NOC — documentacao.noc.updown.com.br (equipamentos, portas, racks, sinal óptico e resumo das PONs; ferramentas doc_*): conectado' : ''}
 - Zabbix direto (alarmes ativos, eventos de um período e qualquer consulta .get): ${conectores.zabbix ? `conectado — instâncias: ${zabbixInstanceNames().join(', ')} (a primeira é a principal)` : 'NÃO configurado'}
 - GenieACS / TR-069 (ONTs e roteadores dos clientes): ${estado(conectores.genieacs)}
 - IXC Soft / ERP (cliente, contrato, login PPPoE, O.S., financeiro): ${estado(conectores.ixc)}

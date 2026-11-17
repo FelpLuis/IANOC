@@ -2,7 +2,9 @@
  * Base de conhecimento do backbone e da rede FTTH.
  *
  * Fonte, em ordem de preferência:
- *   1. /api/topology do NOC (recortes "noc" e "isp") — é o que a equipe edita;
+ *   1. /api/topology do sistema NOC (sistema.updown.com.br, recortes "noc" e "isp") — é o que a equipe edita;
+ *   1b. Documentação de equipamentos (documentacao.noc.updown.com.br), opcional, quando o
+ *       sistema NOC não está configurado ou não responde; os enlaces saem das descrições das portas;
  *   2. sementes em Topologia-NOC.github.io/public/data (geradas do KMZ do backbone);
  *   3. documentos Markdown em ianoc-agent/knowledge/ — o conhecimento que não
  *      está em sistema nenhum (VLANs, procedimentos, contatos de operadora).
@@ -14,6 +16,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { connectorEnabled, nocConfig } from './config.js';
 import { nocGet } from './connectors/noc.js';
+import { docDevices, docZabbix, ifsDoEquipamento, type DocDevice, type DocZabbix } from './connectors/doc.js';
 import { matchesQuery, normalize } from './http.js';
 
 export interface Porta { numero: number; nome?: string; capacidade?: string; tipo?: string; status?: string; descricao?: string; zabbix?: Record<string, unknown> }
@@ -91,13 +94,24 @@ export async function getKnowledge(force = false): Promise<Knowledge> {
       console.warn('[knowledge] topologia do NOC indisponível, usando sementes:', error instanceof Error ? error.message : error);
     }
   }
+  if (!noc && connectorEnabled('doc')) {
+    try {
+      const [devices, zbx] = await Promise.all([docDevices(true), docZabbix(true).catch(() => null)]);
+      if (devices.length) {
+        noc = topologiaDaDocumentacao(devices, zbx);
+        fonte = `Documentação do NOC (${nocConfig.doc.baseUrl})${zbx?.synced ? `, Zabbix sincronizado em ${zbx.synced}` : ''}`;
+      }
+    } catch (error) {
+      console.warn('[knowledge] documentação indisponível:', error instanceof Error ? error.message : error);
+    }
+  }
 
   const nonEmpty = <T>(live: T[] | undefined, seed: T[]) => (Array.isArray(live) && live.length ? live : seed);
   cache = {
     fonte,
     carregadoEm: new Date().toISOString(),
     equipamentos: nonEmpty(noc?.equipamentos, seedEquip),
-    conexoes: nonEmpty(noc?.conexoes, seedConex),
+    conexoes: noc?.conexoes && fonte.startsWith('Documentação') ? noc.conexoes : nonEmpty(noc?.conexoes, seedConex),
     pops: nonEmpty(noc?.pops, seedPops),
     ispPops: nonEmpty(isp?.pops, seedIspPops),
     caixas: nonEmpty(isp?.caixas, seedCaixas),
@@ -106,6 +120,96 @@ export async function getKnowledge(force = false): Promise<Knowledge> {
   };
   loadedAt = Date.now();
   return cache;
+}
+
+// ---------------------------------------------------------------- documentação → topologia
+
+const PORTA_RE = /(?:^|[^a-z0-9])((?:\d+)?(?:ge|xge|xgei|gei|gpon|eth|te|hu|fo)[_-]?\d+(?:\/\d+){1,3})\s*$/i;
+
+function capacidadeDe(nome: string): string | undefined {
+  const forcada = nome.match(/\((\d+(?:\.\d+)?[MG])\)\s*$/i)?.[1];
+  if (forcada) return forcada.toUpperCase();
+  const n = nome.toLowerCase();
+  if (n.startsWith('hundred-gigabit')) return '100G';
+  if (n.startsWith('400ge')) return '400G';
+  if (n.startsWith('100ge')) return '100G';
+  if (n.startsWith('40ge')) return '40G';
+  if (n.startsWith('25ge')) return '25G';
+  if (n.startsWith('10ge') || n.startsWith('xge') || n.startsWith('xgei')) return '10G';
+  if (n.startsWith('gpon')) return 'GPON';
+  if (n.startsWith('ge') || n.startsWith('gei')) return '1G';
+  return undefined;
+}
+
+const vazio = (v?: string) => !v || /^(\?\?|-+|livre|vago|n\/?a)$/i.test(v.trim());
+
+/** Converte os equipamentos da documentação no formato da topologia e deduz os enlaces pelas descrições das portas. */
+export function topologiaDaDocumentacao(devices: DocDevice[], zbx: DocZabbix | null): TopologyPayload {
+  const equipamentos: Equipamento[] = devices.map((d) => {
+    const ifs = zbx ? ifsDoEquipamento(d, zbx) : new Map();
+    return {
+      id: d.id,
+      nome: d.name,
+      modelo: d.model || undefined,
+      categoria: d.role || undefined,
+      local: [d.site, d.rack ? `rack ${d.rack}` : ''].filter(Boolean).join(' · ') || undefined,
+      observacao: [d.mgmt ? `gerência ${d.mgmt}` : '', d.notes || ''].filter(Boolean).join(' — ') || undefined,
+      portas: (d.ports ?? []).map((p, i) => {
+        const z = ifs.get(p.i);
+        const st = (z?.st || p.st || '').toLowerCase();
+        return {
+          numero: i + 1,
+          nome: p.i,
+          capacidade: z?.sp || capacidadeDe(p.i),
+          tipo: p.s && !vazio(p.s) ? p.s : undefined,
+          status: vazio(p.d) && st !== 'up' ? 'livre' : st || 'em uso',
+          descricao: vazio(p.d) ? (z?.a || undefined) : p.d,
+          zabbix: z ? Object.fromEntries(Object.entries(z).filter(([k, v]) => k !== 'i' && v !== '' && v !== undefined)) : undefined,
+        };
+      }),
+    };
+  });
+
+  // Enlaces: a descrição da porta cita o outro equipamento ("SW6750-PRAIA-GRANDE-100GE1/0/6").
+  const tokens = (t: string) => normalize(t).replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter((x) => x.length > 1);
+  const nomes = devices.map((d) => ({ id: d.id, alfa: tokens(d.name).filter((x) => !/\d/.test(x)), num: tokens(d.name).filter((x) => /\d/.test(x)) }));
+  const conexoes: Conexao[] = [];
+  const vistos = new Set<string>();
+  // Só portas físicas e LAGs: subinterface (.100), VLANIF, VE e loopback repetem o mesmo enlace.
+  const logica = (nome: string) => /\.\d+$/.test(nome) || /^(vlanif|ve|loopback|null|nve|tunnel|meth)/i.test(nome);
+  const chavePorta = (id: string, porta: string) => `${id}|${porta.toLowerCase().replace(/\(.*\)$/, '').replace(/[-_\s]/g, '')}`;
+  for (const d of devices) {
+    for (const p of d.ports ?? []) {
+      if (vazio(p.d) || logica(p.i) || /interface em down|reserva|livre/i.test(p.d!)) continue;
+      const texto = ` ${tokens(p.d!).join(' ')} `;
+      const candidatos = nomes
+        .filter((n) => n.id !== d.id && n.alfa.length && n.alfa.every((a) => texto.includes(` ${a} `) || texto.includes(a)))
+        .map((n) => ({ id: n.id, completo: n.num.every((x) => texto.includes(x)) }));
+      const completos = candidatos.filter((c) => c.completo);
+      const alvo = completos.length === 1 ? completos[0] : !completos.length && candidatos.length === 1 ? candidatos[0] : null;
+      if (!alvo) continue;
+      const portaDestino = p.d!.match(PORTA_RE)?.[1];
+      const chave = chavePorta(d.id, p.i);
+      const inversa = portaDestino ? chavePorta(alvo.id, portaDestino) : '';
+      if (vistos.has(chave) || (inversa && vistos.has(inversa))) continue;
+      // LAG com o mesmo nome dos dois lados (Eth-Trunk50 ↔ Eth-Trunk50) sem porta citada: já contado.
+      if (!portaDestino && conexoes.some((c) => c.origem === alvo.id && c.destino === d.id && String(c.portaOrigem) === p.i)) continue;
+      vistos.add(chave);
+      if (inversa) vistos.add(inversa);
+      conexoes.push({ origem: d.id, portaOrigem: p.i, destino: alvo.id, portaDestino, capacidade: capacidadeDe(p.i), tipo: p.s && !vazio(p.s) ? p.s : undefined });
+    }
+  }
+
+  // Sites viram POPs.
+  const sites = [...new Set(devices.map((d) => d.site).filter(Boolean))] as string[];
+  const pops: Pop[] = sites.map((nome) => ({
+    id: normalize(nome).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+    nome,
+    tipo: 'site',
+    observacao: devices.filter((d) => d.site === nome).map((d) => d.name).join(', '),
+  }));
+
+  return { equipamentos, conexoes, pops };
 }
 
 // ---------------------------------------------------------------- resumo para o system prompt

@@ -69,9 +69,25 @@ export const nocConfig = {
     tpmLimit: Number(env('LLM_TPM_LIMIT') || (provider === 'groq' ? 8000 : 0)),
   },
 
+  /**
+   * Documentação de equipamentos do NOC (nocup) — documentacao.noc.updown.com.br. OPCIONAL:
+   * ferramentas doc_* e reserva do backbone se o sistema NOC não responder.
+   */
+  doc: {
+    baseUrl: stripSlash(env('DOC_API_URL')),
+    // portal = login único do Portal NOC (cookie updown_sso); local = login da própria documentação; nenhum = sem login
+    auth: ((v) => (v === 'local' || v === 'nenhum' ? v : 'portal'))((env('DOC_AUTH') || 'portal').toLowerCase()) as 'portal' | 'local' | 'nenhum',
+    loginUrl: stripSlash(env('DOC_LOGIN_URL') || env('PORTAL_URL')),
+    username: env('DOC_API_USER'),
+    password: env('DOC_API_PASSWORD'),
+  },
+
   /** Sistema NOC (Topologia) — sistema.updown.com.br. Proxy de Zabbix, GPON/OLT, RADIUS e clientes do IXC. */
   noc: {
     baseUrl: stripSlash(env('NOC_API_URL')),
+    // Login dos usuários do assistente: Portal NOC (SSO). Vazio = o próprio NOC_API_URL.
+    // Ex.: https://portal.updown.com.br/sso/ianoc
+    authUrl: stripSlash(env('NOC_AUTH_URL')) || stripSlash(env('NOC_API_URL')),
     // Token de sessão fixo OU usuário de serviço (o assistente faz login e renova sozinho).
     token: env('NOC_API_TOKEN'),
     username: env('NOC_API_USER'),
@@ -174,10 +190,13 @@ function opaBase(raw: string): string {
   return `${origin}/api/v1`;
 }
 
-export type ConnectorName = 'noc' | 'zabbix' | 'genieacs' | 'ixc' | 'opa';
+export type ConnectorName = 'doc' | 'noc' | 'zabbix' | 'genieacs' | 'ixc' | 'opa';
 
 export function connectorEnabled(name: ConnectorName): boolean {
   switch (name) {
+    case 'doc':
+      return Boolean(nocConfig.doc.baseUrl && (nocConfig.doc.auth === 'nenhum'
+        || (nocConfig.doc.username && nocConfig.doc.password && (nocConfig.doc.auth === 'local' || nocConfig.doc.loginUrl))));
     case 'noc':
       return Boolean(nocConfig.noc.baseUrl && (nocConfig.noc.token || (nocConfig.noc.username && nocConfig.noc.password)));
     case 'zabbix':
