@@ -1,5 +1,5 @@
 /**
- * Usuários locais da NIA, independentes do sistema NOC (ex.: administrador master).
+ * Usuários locais da NIA, independentes do Portal NOC (ex.: administrador master).
  *
  * Ficam em <pasta do DB_PATH>/usuarios.json (no servidor: /var/lib/ianoc/usuarios.json),
  * com a senha só como hash scrypt (sal aleatório por usuário). Nada de senha em texto.

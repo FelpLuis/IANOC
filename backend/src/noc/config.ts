@@ -70,8 +70,9 @@ export const nocConfig = {
   },
 
   /**
-   * Documentação de equipamentos do NOC (nocup) — documentacao.noc.updown.com.br. OPCIONAL:
-   * ferramentas doc_* e reserva do backbone se o sistema NOC não responder.
+   * Documentação de equipamentos do NOC (nocup) — documentacao.noc.updown.com.br. Fonte do
+   * backbone (equipamentos, portas, enlaces) e do estado do Zabbix/PONs; ferramentas doc_*.
+   * Substitui o antigo sistema NOC (sistema.updown.com.br), que saiu do ar.
    */
   doc: {
     baseUrl: stripSlash(env('DOC_API_URL')),
@@ -82,16 +83,10 @@ export const nocConfig = {
     password: env('DOC_API_PASSWORD'),
   },
 
-  /** Sistema NOC (Topologia) — sistema.updown.com.br. Proxy de Zabbix, GPON/OLT, RADIUS e clientes do IXC. */
+  /** Login dos usuários do assistente: Portal NOC (SSO) — mesmo usuário e senha do portal. */
   noc: {
-    baseUrl: stripSlash(env('NOC_API_URL')),
-    // Login dos usuários do assistente: Portal NOC (SSO) — mesmo usuário e senha do portal.
     // Ex.: https://portal.updown.com.br/sso/ianoc
     authUrl: stripSlash(env('NOC_AUTH_URL')) || 'https://portal.updown.com.br/sso/ianoc',
-    // Token de sessão fixo OU usuário de serviço (o assistente faz login e renova sozinho).
-    token: env('NOC_API_TOKEN'),
-    username: env('NOC_API_USER'),
-    password: env('NOC_API_PASSWORD'),
   },
 
   /**
@@ -190,15 +185,13 @@ function opaBase(raw: string): string {
   return `${origin}/api/v1`;
 }
 
-export type ConnectorName = 'doc' | 'noc' | 'zabbix' | 'genieacs' | 'ixc' | 'opa';
+export type ConnectorName = 'doc' | 'zabbix' | 'genieacs' | 'ixc' | 'opa';
 
 export function connectorEnabled(name: ConnectorName): boolean {
   switch (name) {
     case 'doc':
       return Boolean(nocConfig.doc.baseUrl && (nocConfig.doc.auth === 'nenhum'
         || (nocConfig.doc.username && nocConfig.doc.password && (nocConfig.doc.auth === 'local' || nocConfig.doc.loginUrl))));
-    case 'noc':
-      return Boolean(nocConfig.noc.baseUrl && (nocConfig.noc.token || (nocConfig.noc.username && nocConfig.noc.password)));
     case 'zabbix':
       return nocConfig.zabbix.length > 0;
     case 'genieacs':

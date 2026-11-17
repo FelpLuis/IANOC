@@ -9,8 +9,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "scan": "tsx src/scripts/scan-projects.ts",
-    "noc:selftest": "tsx src/scripts/noc-selftest.ts",
-    "noc:criar-usuario": "tsx src/scripts/criar-usuario-noc.ts"
+    "noc:selftest": "tsx src/scripts/noc-selftest.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",

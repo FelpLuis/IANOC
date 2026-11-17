@@ -10,7 +10,7 @@ export interface AuthUser {
 
 /**
  * Só monta o app (e abre o WebSocket) com sessão válida.
- * Login com usuário local da NIA (ex.: administrador master) ou do sistema NOC; quem valida
+ * Login com usuário local da NIA (ex.: administrador master) ou do Portal NOC; quem valida
  * é o backend. Usuário local com troca de senha pendente vê só a tela de troca.
  */
 export function AuthGate({ children }: { children: (user: AuthUser, logout: () => void) => ReactNode }) {

@@ -427,7 +427,7 @@ export interface TopologyGraph {
 // Cadastro proposto pela NIA, aguardando confirmação (backend/src/noc/acoes.ts).
 export interface AcaoPendente {
   id: string;
-  tipo: 'zabbix_host' | 'noc_cliente' | 'noc_pop' | 'noc_equipamento' | 'noc_enlace';
+  tipo: 'zabbix_host';
   titulo: string;
   campos: Array<{ rotulo: string; valor: string }>;
   avisos: string[];

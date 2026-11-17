@@ -442,7 +442,7 @@ async function conectados(t: Turn, q: Parsed, k: Knowledge): Promise<string> {
   return [
     `Varredura de conexões concluída. ${varios}${falas.join('. ')}.${falaPppoe}`,
     ...md.filter(Boolean),
-    g.resumo.inferidos ? '**Sugestão:** as ligações inferidas vêm do nome/local dos hosts do Zabbix. Cadastre esses enlaces na topologia do NOC e eu passo a mostrar porta e capacidade de cada um.' : '',
+    g.resumo.inferidos ? '**Sugestão:** as ligações inferidas vêm do nome/local dos hosts do Zabbix. Documente esses enlaces nas portas da documentação do NOC e eu passo a mostrar porta e capacidade de cada um.' : '',
   ].filter(Boolean).join('\n\n');
 }
 
@@ -452,7 +452,6 @@ const origem = (u?: string) => { try { return u ? new URL(u).origin : undefined;
 const webZabbix = () => { const z = nocConfig.zabbix[0]?.url; return z ? z.replace(/\/?api_jsonrpc\.php$/i, '').replace(/\/+$/, '') : undefined; };
 const webIxc = () => { const o = origem(nocConfig.ixc.baseUrl); return o ? `${o}/adm.php` : undefined; };
 const webOpa = () => { const o = origem(nocConfig.opa.baseUrl); return o ? `${o}/atendente/` : undefined; };
-const webNoc = () => origem(nocConfig.noc.baseUrl);
 const webDoc = () => origem(nocConfig.doc.baseUrl);
 
 /**
@@ -484,7 +483,7 @@ async function abrir(t: Turn, q: Parsed): Promise<string> {
   if (/\bixc\b/.test(tx)) { const u = webIxc(); if (u) alvos.push({ url: u, label: 'IXC' }); }
   if (/\bopa\b/.test(tx)) { const u = webOpa(); if (u) alvos.push({ url: u, label: 'Opa! Suite' }); }
   if (/\bdocumenta(cao|ção)\b|\brack/.test(tx)) { const u = webDoc(); if (u) alvos.push({ url: u, label: 'Documentação do NOC' }); }
-  else if (/\bsistema( do)? noc\b|\bpainel( do)? noc\b|\bnoc\b/.test(tx) && !/\bzabbix\b/.test(tx)) { const u = webNoc() ?? webDoc(); if (u) alvos.push({ url: u, label: webNoc() ? 'Sistema NOC' : 'Documentação do NOC' }); }
+  else if (/\bsistema( do)? noc\b|\bpainel( do)? noc\b|\bnoc\b/.test(tx) && !/\bzabbix\b/.test(tx)) { const u = webDoc(); if (u) alvos.push({ url: u, label: 'Documentação do NOC' }); }
   if (q.caixa || /\b(cto|ceo|caixa)\b/.test(tx)) {
     const termo = q.caixa ?? q.original.replace(/^.*?\b(cto|ceo|caixa)\b/i, '$1').replace(/[?!.]+$/, '');
     const r = await t.call<{ caixas?: Array<{ nome: string; lat?: number; lon?: number }> }>('ftth_buscar', { termo, tipo: 'caixa' });
@@ -520,7 +519,7 @@ async function abrir(t: Turn, q: Parsed): Promise<string> {
   }
 
   const unicos = alvos.filter((a, i) => alvos.findIndex((b) => b.url === a.url) === i).slice(0, 5);
-  if (!unicos.length) return 'Para onde, Chefe? Abro Zabbix, IXC, Opa!, o sistema NOC, o mapa de uma CTO, uma pesquisa no Google ou um endereço que você disser.';
+  if (!unicos.length) return 'Para onde, Chefe? Abro Zabbix, IXC, Opa!, a documentação do NOC, o mapa de uma CTO, uma pesquisa no Google ou um endereço que você disser.';
   for (const a of unicos) t.open(a.url, a.label);
   return [
     `Abrindo ${unicos.map((a) => a.label).join(', ')} em nova guia.`,
@@ -670,18 +669,7 @@ async function impacto(t: Turn, q: Parsed, k: Knowledge): Promise<string> {
 
 async function onus(t: Turn, q: Parsed): Promise<string> {
   const busca = q.cliente ?? q.host;
-  if (on('noc')) {
-    const r = await t.call<{ por_status?: Record<string, number>; total: number; items: Rec[] }>('noc_gpon_clientes', { apenas_problema: !busca, ...(busca ? { busca } : {}), limite: 50 });
-    if (r.ok) {
-      const items = r.data.items ?? [];
-      const fala = busca
-        ? `Encontrei ${plural(r.data.total ?? items.length, 'ONU', 'ONUs')} para "${busca}".`
-        : `Há ${plural(r.data.total ?? items.length, 'ONU com problema', 'ONUs com problema')} (fora do ar ou sinal pior que menos 27 dBm).`;
-      return [fala, counts(r.data.por_status, 'Status'),
-        table(['Cliente/ONU', 'OLT', 'PON', 'Status', 'RX (dBm)', 'TX (dBm)'], items.slice(0, 25).map((c) => [c.name ?? c.nome ?? c.serial, c.olt, c.pon, c.status, c.rx_power, c.tx_power]))].join('\n\n');
-    }
-  }
-  // Sem o sistema NOC: resumo das PONs pela documentação + alarmes de cliente no Zabbix.
+  // Resumo das PONs pela documentação + alarmes de cliente no Zabbix.
   let ponTxt = '';
   if (on('doc')) {
     const p = await t.call<{ total: number; zabbix_sincronizado?: string; items: Rec[] }>('doc_pon', { apenas_problema: true, limite: 30 });
@@ -700,7 +688,7 @@ async function onus(t: Turn, q: Parsed): Promise<string> {
     ps.length ? counts(causas, 'Causa') : '',
     ps.length ? table(['Cliente', 'Problema', 'Severidade', 'Desde'], ps.slice(0, 20).map((p) => [p.host, cut(p.problema, 80), p.severidade, p.desde])) : '',
     ponTxt,
-    on('noc') || on('doc') ? '' : '_O sinal das PONs vem da documentação do NOC, que não está configurada neste servidor; mostrei os alarmes do Zabbix._',
+    on('doc') ? '' : '_O sinal das PONs vem da documentação do NOC, que não está configurada neste servidor; mostrei os alarmes do Zabbix._',
   ].filter(Boolean).join('\n\n');
 }
 
@@ -904,7 +892,7 @@ const AJUDA = [
   '- **Perguntas gerais** — "quanto é 15% de 230?", "que horas são?", "quem inventou a fibra óptica?" (pesquiso na web e respondo)',
   '- **Engenharia** — "crie um script Python que manda os alarmes de desastre no Telegram", "calcule o orçamento óptico de 15 km com splitter 1:8 e 1:16", "monte um sensor de temperatura para o POP com ESP32"',
   '- **Base de conhecimento** — "o que diz o manual sobre troca de ONU?", "procure nos documentos sobre VLAN" (envie PDFs em Base e identidade)',
-  '- **Cadastros (com confirmação)** — "cadastre no zabbix o host X com IP 10.0.0.5 no grupo OLTs UpDown", cliente, POP, equipamento ou enlace no sistema NOC',
+  '- **Cadastros (com confirmação)** — "cadastre no zabbix o host X com IP 10.0.0.5 no grupo OLTs UpDown"',
   '- **Manuais e pesquisa na web** — "gere um manual de como configurar a ONU HG8245H", "pesquise na web sobre GPON"',
   '- **Navegador** — "abre o Zabbix", "abre o IXC e o Opa", "abre o mapa da CTO 366", "pesquisa fibra óptica no Google"',
   '- **Conexões** — "quais aparelhos estão conectados no N8000?", "o que está ligado no 6730?"',

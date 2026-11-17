@@ -45,24 +45,22 @@ Opcionalmente, um modelo de linguagem (Claude, Groq, Gemini, OpenRouter ou Ollam
 responder perguntas livres; veja "Configurar". Mesmo com modelo, os relatórios usam os números
 do servidor e, se o modelo falhar, a análise nativa assume.
 
-**Cadastros com confirmação (única escrita).** "Cadastre no zabbix o host X com IP Y no grupo Z, template W",
-cliente, POP, equipamento ou enlace no sistema NOC: a NIA confere os dados (grupo/template existem,
-equipamento existe, porta livre), mostra um cartão com todos os campos e só grava quando um
-**administrador** clica em Confirmar (uso único, 15 min). Liberado: Zabbix `host.create`; NOC
-`POST /api/clientes`, `POST /api/locais` e `PUT /api/topology` (relida na hora, só acrescentando).
-Nada de alteração ou exclusão. Auditoria em `<dados>/auditoria.log`. O usuário de serviço do NOC
-com essas permissões: `npm run noc:criar-usuario -- --escrita`.
+**Cadastros com confirmação (única escrita).** "Cadastre no zabbix o host X com IP Y no grupo Z, template W":
+a NIA confere os dados (grupo/template existem, host ainda não existe), mostra um cartão com todos os
+campos e só grava quando um **administrador** clica em Confirmar (uso único, 15 min). Liberado: só
+Zabbix `host.create`. Nada de alteração ou exclusão. Auditoria em `<dados>/auditoria.log`.
+Equipamentos, POPs e enlaces se documentam em https://documentacao.noc.updown.com.br e clientes no IXC
+(os cadastros pelo antigo sistema.updown.com.br saíram junto com ele).
 
 **Fora os cadastros, somente leitura.** Nenhuma outra ferramenta altera estado: o Zabbix aceita só métodos `.get`,
-o GenieACS e o Opa! Suite só GET, o IXC só `listar`, e o NOC é acessado por um usuário de serviço.
+o GenieACS e o Opa! Suite só GET, o IXC só `listar`, e a documentação do NOC só é lida (usuário de serviço).
 Quando uma ação resolveria o problema (reboot, provisionamento), o assistente diz qual é
 e onde fazer, e um humano executa.
 
 | Ambiente | O que o assistente consulta | Variáveis em `backend/.env` |
 |---|---|---|
-| Sistema NOC (sistema.updown.com.br) | topologia, interfaces/tráfego/enlaces do Zabbix, ONUs das OLTs ZTE C300/C350 com sinal RX/TX, histórico GPON, log RADIUS, clientes do IXC, tickets | `NOC_API_URL`, `NOC_API_USER`, `NOC_API_PASSWORD` |
+| Documentação do NOC (documentacao.noc.updown.com.br) | backbone (equipamentos, portas, racks, enlaces tirados das descrições das portas), estado das interfaces no Zabbix (status, velocidade, RX/TX óptico, tráfego) e resumo das PONs das OLTs (ONUs, RX médio, sinal baixo, pior ONU) — ferramentas `doc_*` | `DOC_API_URL`, `DOC_AUTH`, `DOC_LOGIN_URL`, `DOC_API_USER`, `DOC_API_PASSWORD` |
 | Portal NOC (portal.updown.com.br) | login dos usuários do assistente — mesmo usuário e senha do portal | `NOC_AUTH_URL` |
-| Documentação do NOC (opcional) | equipamentos, portas, racks, sinal óptico e resumo das PONs (ferramentas `doc_*`); reserva do backbone se o sistema NOC não responder | `DOC_API_URL`, `DOC_AUTH`, `DOC_LOGIN_URL`, `DOC_API_USER`, `DOC_API_PASSWORD` |
 | Zabbix (até 3 instâncias) | alarmes ativos, relatório de eventos de um período (hosts que mais caíram, tempo em problema, recorrências) e qualquer consulta `.get` | `ZABBIX_URL` + `ZABBIX_TOKEN` ou `ZABBIX_USER`/`ZABBIX_PASSWORD`; `ZABBIX2_*`, `ZABBIX3_*` |
 | GenieACS (TR-069) | CPE por serial/PPPoE, último inform, WAN, Wi-Fi, falhas, tarefas pendentes | `GENIEACS_NBI_URL` |
 | IXC Soft | cliente, contrato, login PPPoE, O.S., financeiro (CPF/CNPJ mascarados), relatório de O.S. por período | `IXC_BASE_URL`, `IXC_API_TOKEN` |
@@ -104,9 +102,8 @@ Cada conector liga sozinho quando as variáveis dele estão preenchidas.
    - **Relatórios** não dependem do modelo para os números: a ferramenta `relatorio_noc` monta
      tabelas com os dados exatos do Zabbix, IXC e Opa! no servidor, e o modelo só escreve a análise.
    - **Claude:** `ANTHROPIC_API_KEY` (ou `ant auth login` e `CLAUDE_ENABLED=true`), modelo padrão `claude-opus-5`.
-2. Usuário de serviço do NOC: `cd backend && npm run noc:criar-usuario` pede um login de
-   administrador, cria o perfil `ianoc_leitura` (só `topology.view`, `zabbix.view`,
-   `clientes.view`, `radius.view`) e o usuário `ianoc-servico`, e grava `NOC_API_*` no `.env`.
+2. Usuário de serviço da documentação: crie no Portal NOC (portal.updown.com.br → Usuários) um
+   usuário com o sistema `documentacao` liberado e grave `DOC_API_USER`/`DOC_API_PASSWORD` no `.env`.
 3. Preencha Zabbix, GenieACS e IXC conforme disponível. O NBI do GenieACS (7557) não
    autentica: alcance por rede interna ou túnel (`ssh -L 7557:127.0.0.1:7557 ...`).
 4. Complete os trechos `A PREENCHER` em `knowledge/` (VLANs, operadoras, contatos,
@@ -120,7 +117,7 @@ Em desenvolvimento, o Vite faz proxy de `/api` e `/ws` para o backend na porta `
 ### Publicar no servidor
 
 O backend serve a interface e o WebSocket numa porta só (padrão 8090), com login pelo
-usuário e senha do sistema NOC (perfil `cliente` nunca entra; perfis liberados em
+usuário e senha do Portal NOC (perfil `cliente` nunca entra; perfis liberados em
 `IANOC_ALLOWED_ROLES`). Em produção a varredura de projetos e a leitura de arquivos do
 disco ficam desligadas.
 
@@ -172,7 +169,7 @@ No servidor:
 ### Acesso e identidade visual
 
 Com `IANOC_AUTH=local` só entra o usuário de `IANOC_ADMIN_USER` (ex.: `NOC`), com a senha
-de `IANOC_ADMIN_PASSWORD`; o login do sistema NOC e os outros usuários locais ficam
+de `IANOC_ADMIN_PASSWORD`; o login do Portal NOC e os outros usuários locais ficam
 desligados. `IANOC_ADMIN_TROCA_SENHA=nao` mantém a senha fixa (sem troca no primeiro acesso;
 mudou no `.env`, vale na próxima partida). As três ficam só em `/etc/ianoc/ianoc.env`.
 
